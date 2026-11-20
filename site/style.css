@@ -1027,15 +1027,53 @@ dialog .error {
   height: calc(2.8 * var(--row));
 }
 #projector .reel::before {
-  --ticket-fill: #e8ca8d;
-  --ticket-perforation: #5d403a73;
+  --ticket-fill:
+    repeating-linear-gradient(0deg, #fff6d00d 0 1px, #824c2210 1px 2px, transparent 2px 4px),
+    linear-gradient(112deg, #b47a36, #e7bd72 16%, #ffedba 34%, #dcaa58 54%, #fce4aa 74%, #c99348);
+  --ticket-perforation: #613b207d;
+  box-shadow:
+    inset 0 0 0 1px #fff0c4b0,
+    inset 0 0 0 3px #98602d65,
+    inset 0 -7px 16px #8c56273d;
 }
 #projector .reel[data-phase="spin"]::before {
   --ticket-fill: #662d3d;
   --ticket-perforation: #f3d7a58c;
+  box-shadow: none;
 }
-#projector .reel:is([data-phase="landed"], [data-phase="summary"])::before {
-  --ticket-fill: var(--ticket-gold);
+.projector-main .reel[data-phase="landed"] {
+  --winner-ticket-width: min(94%, var(--ticket-width));
+  height: auto;
+  min-height: calc(2.8 * var(--row));
+  grid-template-rows: 1fr auto 1fr;
+}
+.projector-main .reel[data-phase="landed"]::before,
+.projector-main .reel[data-phase="landed"] .reel-track {
+  grid-area: 2 / 1;
+  position: relative;
+  inset: auto;
+  width: var(--winner-ticket-width);
+}
+.projector-main .reel[data-phase="landed"]::before {
+  align-self: stretch;
+  height: auto;
+}
+.projector-main .reel[data-phase="landed"] .reel-track {
+  display: grid;
+  align-items: center;
+  min-height: var(--row);
+  padding-block: clamp(14px, 1.9vw, 28px);
+}
+.projector-main .reel[data-phase="landed"] .reel-row {
+  display: none;
+}
+.projector-main .reel[data-phase="landed"] .reel-row[data-center="true"] {
+  display: grid;
+  position: relative;
+  inset: auto;
+  height: auto;
+  width: min(76%, var(--ticket-text-width));
+  text-wrap: balance;
 }
 #projector .reel::after {
   display: none;
