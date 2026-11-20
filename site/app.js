@@ -692,10 +692,31 @@ function startOperator() {
     updateReveal();
   }
 
+  function selectPrize(id) {
+    selected = id;
+    $('prize-select').value = id;
+    if (run && !active()) {
+      run = null;
+      renderResults('operator-results', null);
+    }
+    queuePresentation('selection');
+    renderControls();
+  }
+
   function next() {
     if (!canAdvance()) return;
     if (run.revealed === run.receipt.count) {
       Object.assign(run, { phase: 'complete', pausedAt: null });
+      if (run.advance === 'manual') {
+        const prizes = state.prizes;
+        const current = prizes.findIndex(prize => prize.id === run.receipt.prizeId);
+        const nextPrize = [...prizes.slice(current + 1), ...prizes.slice(0, Math.max(0, current))]
+          .find(prize => !prize.archived && prize.remaining > 0);
+        if (nextPrize) {
+          selectPrize(nextPrize.id);
+          return;
+        }
+      }
     } else {
       Object.assign(run, { phase: 'spin', start: Date.now(), index: run.index + 1, pausedAt: null });
     }
@@ -1062,13 +1083,7 @@ function startOperator() {
     });
   });
   $('prize-select').addEventListener('change', () => {
-    selected = $('prize-select').value;
-    if (run && !active()) {
-      run = null;
-      renderResults('operator-results', null);
-    }
-    queuePresentation('selection');
-    renderControls();
+    selectPrize($('prize-select').value);
   });
   $('draw').addEventListener('click', startDraw);
   $('advance').addEventListener('change', publish);
