@@ -699,6 +699,26 @@ dialog .error {
 #projector:fullscreen #fullscreen {
   display: none;
 }
+#projector-draw {
+  display: none;
+}
+#projector:fullscreen #projector-draw {
+  display: inline-block;
+  min-width: 88px;
+  min-height: 44px;
+}
+#projector-draw:enabled {
+  background: #e1d3fb;
+  border-color: #e1d3fb;
+  color: var(--stage);
+}
+#projector-draw:enabled:hover {
+  background: #f2e8ff;
+  border-color: #f2e8ff;
+}
+#projector-draw:disabled {
+  color: var(--stage-muted);
+}
 .sr-only {
   position: absolute;
   width: 1px;

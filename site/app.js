@@ -37,12 +37,14 @@ function renderResults(id, run) {
 if (isProjector) {
   const channel = new BroadcastChannel('raffle-projector-' + audience);
   const reel = new Reel($('projector-stage').querySelector('.reel'));
+  const projector = $('projector');
+  const drawButton = $('projector-draw');
   let live = null;
   let frame = 0;
   $('operator').hidden = true;
   for (const dialog of document.querySelectorAll('dialog')) dialog.remove();
   document.body.classList.add('presentation');
-  $('projector').hidden = false;
+  projector.hidden = false;
   reel.idle('Ready for the draw');
 
   function render() {
@@ -69,12 +71,18 @@ if (isProjector) {
   channel.addEventListener('message', event => {
     if (event.data?.type !== 'state') return;
     live = event.data;
+    drawButton.disabled = !live.drawTx;
     render();
   });
   channel.postMessage({ type: 'ready' });
   $('fullscreen').addEventListener('click', async () => {
-    try { await $('projector').requestFullscreen(); }
+    try { await projector.requestFullscreen(); }
     catch (_) { say('fullscreen', 'Fullscreen unavailable'); }
+  });
+  drawButton.addEventListener('click', () => {
+    if (document.fullscreenElement !== projector || drawButton.disabled) return;
+    drawButton.disabled = true;
+    channel.postMessage({ type: 'draw', tx: live.drawTx });
   });
 } else {
   startOperator();
@@ -100,6 +108,7 @@ function startOperator() {
   let editingPrize = '';
   let limit = 30;
   let run = null;
+  let offeredDraw = null;
   let frame = 0;
   let advanceTimer = 0;
 
@@ -169,12 +178,18 @@ function startOperator() {
   function publish() {
     channel.postMessage({
       type: 'state', eventName: state?.eventName || 'Raffle Draw',
-      prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '', run
+      prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
+      drawTx: offeredDraw?.tx, run
     });
   }
 
   channel.addEventListener('message', event => {
-    if (event.data?.type === 'ready') publish();
+    const message = event.data;
+    if (message?.type === 'ready') publish();
+    if (message?.type === 'draw') {
+      if (offeredDraw && message.tx === offeredDraw.tx) startDraw();
+      else publish();
+    }
   });
 
   function applyState(value) {
@@ -258,7 +273,6 @@ function startOperator() {
     showMessage('notice', warnings.join(' '));
     renderHistory();
     renderControls();
-    publish();
   }
 
   function active() {
@@ -271,6 +285,8 @@ function startOperator() {
     const waiting = token && pending();
     $('prize-select').disabled = !state?.prizes.length || mutation || !!active();
     $('draw').disabled = !token || !count || !!active() || mutation || !!waiting || !!state?.invalid || !!state?.excluded;
+    if ($('draw').disabled) offeredDraw = null;
+    else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
     say('draw', mutation ? 'Saving…' : count ? 'Draw ' + number.format(count) + (count === 1 ? ' winner' : ' winners') : 'Draw winners');
     say('slots', prize ? number.format(prize.remaining) + ' winning slots remaining' : state ? 'Choose an available prize.' : 'Connect to load your prizes.');
     $('retry').hidden = !waiting;
@@ -289,6 +305,7 @@ function startOperator() {
       say('stage-status', prize?.name || 'Standby');
       say('stage-caption', state ? (prize ? 'Choose Draw winners when the audience is ready' : 'Set up a prize to begin') : 'Connect your spreadsheet to begin');
     }
+    publish();
   }
 
   function drawFrame() {
@@ -307,7 +324,6 @@ function startOperator() {
     say('stage-caption', active() ? 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count + ' · ' + message : message);
     renderResults('operator-results', run);
     renderControls();
-    publish();
     if (!run.pausedAt && run.phase === 'spin') {
       advanceTimer = setTimeout(land, Math.max(0, run.start + run.spin - Date.now()));
     } else if (!run.pausedAt && run.phase === 'hold' && run.advance === 'auto') {
@@ -338,6 +354,11 @@ function startOperator() {
       phase: 'spin', start: Date.now(), spin: duration(speed, reduceMotion.matches), pausedAt: null, revealed: 0
     };
     updateReveal();
+  }
+
+  function startDraw() {
+    if (!offeredDraw || pending()) return;
+    commitDraw({ ...offeredDraw, started: Date.now(), speed: $('speed').value, advance: $('advance').value });
   }
 
   async function commitDraw(request) {
@@ -486,12 +507,8 @@ function startOperator() {
       renderResults('operator-results', null);
     }
     renderControls();
-    publish();
   });
-  $('draw').addEventListener('click', () => {
-    if ($('draw').disabled) return;
-    commitDraw({ tx: crypto.randomUUID(), prizeId: selected, started: Date.now(), speed: $('speed').value, advance: $('advance').value });
-  });
+  $('draw').addEventListener('click', startDraw);
   $('retry').addEventListener('click', () => commitDraw(pending()));
   $('replay').addEventListener('click', async () => {
     if (!state?.lastDraw || mutation || active()) return;
