@@ -999,7 +999,7 @@ dialog .error {
   --ticket-width: 860px;
   --ticket-text-width: 645px;
   display: grid;
-  grid-template-rows: minmax(1.5rem, auto) auto auto minmax(1.5rem, auto);
+  grid-template-rows: minmax(1.5rem, auto) auto minmax(1.5rem, auto);
   align-self: center;
   width: min(100%, 1200px);
   min-width: 0;
@@ -1017,10 +1017,10 @@ dialog .error {
   grid-row: 1;
 }
 #projector-caption {
-  grid-row: 4;
+  grid-row: 3;
 }
 #projector-caption[data-announcement-only],
-#projector:fullscreen .projector-action:not([hidden]) + #projector-caption[data-drawing] {
+#projector:fullscreen:has(.projector-action:not([hidden])) #projector-caption[data-drawing] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1115,20 +1115,19 @@ dialog .error {
   color: var(--ticket-gold);
 }
 #projector:fullscreen {
+  --action-inset: clamp(16px, 2.5vw, 44px);
   overflow: auto;
+}
+#projector:fullscreen:has(.projector-action:not([hidden])) {
+  padding-block-end: calc(var(--action-inset) + 60px);
+}
+#projector:fullscreen:has(.projector-action:not([hidden]) #projector-hold-note:not([hidden])) {
+  padding-block-end: calc(var(--action-inset) + 108px);
 }
 #projector:fullscreen #fullscreen,
 .projector-tools,
-#projector:not(:fullscreen) :is(.projector-action, #projector-redraw) {
+#projector:not(:fullscreen) .projector-action {
   display: none;
-}
-#projector-redraw {
-  position: fixed;
-  inset-inline-start: clamp(16px, 2.5vw, 44px);
-  inset-block-end: clamp(16px, 2.5vw, 44px);
-  z-index: 2;
-  min-height: 44px;
-  font-size: 0.875rem;
 }
 #projector #redraw-dialog {
   background: #26171c;
@@ -1204,19 +1203,18 @@ dialog .error {
   padding-inline: 9px;
 }
 .projector-action {
-  grid-row: 3;
-  justify-self: center;
-  position: relative;
+  position: fixed;
+  inset-inline-start: var(--action-inset);
+  inset-block-end: var(--action-inset);
+  z-index: 2;
+  max-width: min(19rem, calc(100% - 68px));
   color: var(--stage-muted);
 }
-.projector-main .reel:not([data-phase="spin"]) + .projector-action {
-  margin-block-start: -44px;
+.projector-action-buttons {
+  display: flex;
+  gap: 8px;
 }
-#projector:fullscreen .reel[data-phase="landed"] {
-  grid-template-rows: minmax(56px, 1fr) auto minmax(56px, 1fr);
-}
-#projector #projector-action-button {
-  min-width: 8.25rem;
+#projector :is(#projector-action-button, #projector-redraw) {
   min-height: 44px;
   padding: 0.45rem 1.1rem;
   border-radius: 999px;
@@ -1226,17 +1224,20 @@ dialog .error {
   font-size: 0.875rem;
   letter-spacing: 0.02em;
 }
+#projector #projector-action-button {
+  min-width: 8.25rem;
+}
 #projector #projector-action-button:hover:not(:disabled) {
   border-color: var(--ticket-gold);
   background-color: #4c2530;
   color: var(--projector-ivory);
 }
 #projector-hold-note {
-  margin-block-start: 8px;
+  margin-block-end: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--stage);
   font-size: 0.8125rem;
-}
-#projector:fullscreen .projector-action:not([hidden]) + #projector-caption:not([data-announcement-only], [data-drawing]) {
-  margin-block-start: 8px;
 }
 @media (max-width: 680px) {
   #projector {
@@ -1259,10 +1260,7 @@ dialog .error {
   #projector:fullscreen #projector-results {
     padding-inline-start: 44px;
   }
-  #projector:fullscreen:has(#projector-redraw:not([hidden])) {
-    padding-block-end: 74px;
-  }
-  #projector-redraw {
+  .projector-action {
     inset-inline-start: 52px;
   }
 }

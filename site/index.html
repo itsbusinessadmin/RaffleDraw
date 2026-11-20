@@ -118,14 +118,16 @@
     <div class="projector-main" id="projector-stage">
       <p id="projector-position" hidden></p>
       <div class="reel" aria-hidden="true"></div>
-      <div class="projector-action" id="projector-action" hidden>
-        <button id="projector-action-button" type="button" aria-describedby="projector-hold-note" disabled>Draw</button>
-        <p id="projector-hold-note" role="status" hidden></p>
-      </div>
       <p id="projector-caption" aria-live="polite"></p>
     </div>
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
-    <button id="projector-redraw" type="button" hidden>Re-draw</button>
+    <div class="projector-action" id="projector-action" hidden>
+      <p id="projector-hold-note" role="status" hidden></p>
+      <div class="projector-action-buttons">
+        <button id="projector-action-button" type="button" aria-describedby="projector-hold-note" disabled>Draw</button>
+        <button id="projector-redraw" type="button" hidden>Re-draw</button>
+      </div>
+    </div>
     <dialog id="redraw-dialog" aria-labelledby="redraw-heading" aria-describedby="redraw-warning">
       <form id="redraw-form" method="dialog">
         <h2 id="redraw-heading">Re-draw this winner?</h2>
