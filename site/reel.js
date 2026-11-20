@@ -24,17 +24,17 @@ export class Reel {
     });
   }
 
-  idle(label) {
-    this.track.hidden = true;
-    this.placeholder.hidden = false;
-    this.placeholder.textContent = label;
-    this.el.dataset.phase = 'idle';
+  idle(label, phase = 'idle') {
+    if (!this.track.hidden) this.track.hidden = true;
+    if (this.placeholder.hidden) this.placeholder.hidden = false;
+    if (this.placeholder.textContent !== label) this.placeholder.textContent = label;
+    if (this.el.dataset.phase !== phase) this.el.dataset.phase = phase;
   }
 
   show(run, now) {
     const { receipt, index, phase, start, spin, pausedAt, speed } = run;
     if (phase === 'summary') {
-      this.idle('Draw complete');
+      this.idle('Draw complete', 'summary');
       return;
     }
     const pool = receipt.names.length ? receipt.names : receipt.winners;
@@ -44,9 +44,11 @@ export class Reel {
     const base = Math.floor(travelled);
     const fraction = travelled - base;
     const landed = atRest || travelled === steps;
-    this.track.hidden = false;
-    this.placeholder.hidden = true;
-    this.el.dataset.phase = landed ? 'landed' : 'spin';
+    if (this.track.hidden) this.track.hidden = false;
+    if (!this.placeholder.hidden) this.placeholder.hidden = true;
+    const reelPhase = landed ? 'landed' : 'spin';
+    if (this.el.dataset.phase !== reelPhase) this.el.dataset.phase = reelPhase;
+    const center = fraction < 0.5 ? 3 : 4;
     for (let i = 0; i < this.rows.length; i++) {
       const logical = index * steps + base + i - 3;
       const winner = logical > 0 && logical <= (index + 1) * steps && logical % steps === 0 ? receipt.winners[logical / steps - 1] : undefined;
@@ -56,7 +58,8 @@ export class Reel {
         row.textContent = name;
         row.classList.toggle('long', name.length > 28);
       }
-      row.dataset.center = String(i === (fraction < 0.5 ? 3 : 4));
+      const centered = String(i === center);
+      if (row.dataset.center !== centered) row.dataset.center = centered;
     }
     this.track.style.transform = 'translate3d(0, calc(var(--row) * ' + -fraction + '), 0)';
   }

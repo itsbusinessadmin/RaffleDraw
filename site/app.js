@@ -26,12 +26,15 @@ function node(tag, label) {
 
 function renderResults(id, run) {
   const list = $(id);
-  const count = run ? run.revealed : 0;
-  const key = run ? run.receipt.tx + ':' + count : '';
-  if (list.dataset.results === key) return;
-  list.dataset.results = key;
-  list.hidden = !count;
-  list.replaceChildren(...(run?.receipt.winners.slice(0, count) || []).map(name => node('li', name)));
+  const count = run?.revealed ?? 0;
+  const tx = run?.receipt.tx || '';
+  if (list.dataset.tx !== tx || list.children.length > count) {
+    list.replaceChildren();
+    list.dataset.tx = tx;
+  }
+  if (list.hidden !== !count) list.hidden = !count;
+  if (list.children.length === count) return;
+  list.append(...run.receipt.winners.slice(list.children.length, count).map(name => node('li', name)));
 }
 
 if (isProjector) {
@@ -47,9 +50,17 @@ if (isProjector) {
   projector.hidden = false;
   reel.idle('Ready for the draw');
 
+  function drawFrame() {
+    const run = live.run;
+    const now = Date.now();
+    reel.show(run, now);
+    if (run.phase === 'spin' && !run.pausedAt && now - run.start < run.spin) {
+      frame = requestAnimationFrame(drawFrame);
+    }
+  }
+
   function render() {
     cancelAnimationFrame(frame);
-    if (!live) return;
     const { eventName, prizeName, run } = live;
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
@@ -62,8 +73,7 @@ if (isProjector) {
       say('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
       say('projector-caption', done ? run.revealed + ' winners revealed' :
         run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
-      reel.show(run, Date.now());
-      if (run.phase === 'spin' && !run.pausedAt && Date.now() - run.start < run.spin) frame = requestAnimationFrame(render);
+      drawFrame();
     }
     renderResults('projector-results', run);
   }
@@ -106,6 +116,7 @@ function startOperator() {
   let syncError = '';
   let mutation = false;
   let selected = '';
+  let prizeOptionsKey = '';
   let editingPrize = '';
   let resetRequest = null;
   let limit = 30;
@@ -245,8 +256,9 @@ function startOperator() {
 
   function renderHistory() {
     const query = $('search').value.trim().toLocaleLowerCase();
-    const rows = (state?.history || []).filter(item =>
-      [item.name, item.prizeName, item.id].some(value => String(value).toLocaleLowerCase().includes(query)));
+    const history = state?.history || [];
+    const rows = query ? history.filter(item =>
+      [item.name, item.prizeName, item.id].some(value => String(value).toLocaleLowerCase().includes(query))) : history;
     $('history').replaceChildren(...rows.slice(0, limit).map(item => {
       const row = document.createElement('tr');
       row.append(node('td', item.name), node('td', item.prizeName), node('td', date.format(new Date(item.at))));
@@ -260,14 +272,18 @@ function startOperator() {
     const prizes = state?.prizes || [];
     if (!prizes.some(prize => prize.id === selected && prize.remaining)) selected = prizes.find(prize => prize.remaining)?.id || '';
     const selector = $('prize-select');
-    selector.replaceChildren(new Option(prizes.length ? 'Select a prize' : 'No prizes yet', ''), ...prizes.map(prize => {
-      const complete = !prize.remaining;
-      const label = complete ? prize.name + ' · Complete (' + number.format(prize.won) + '/' + number.format(prize.limit) + ')' : prize.name;
-      const option = new Option(label, prize.id);
-      option.disabled = complete;
-      return option;
-    }));
-    selector.value = selected;
+    const options = prizes.map(({ id, name, remaining, won, limit }) => [id, name, !remaining, won, limit]);
+    const optionsKey = JSON.stringify(options);
+    if (optionsKey !== prizeOptionsKey) {
+      prizeOptionsKey = optionsKey;
+      selector.replaceChildren(new Option(prizes.length ? 'Select a prize' : 'No prizes yet', ''), ...options.map(([id, name, complete, won, limit]) => {
+        const label = complete ? name + ' · Complete (' + number.format(won) + '/' + number.format(limit) + ')' : name;
+        const option = new Option(label, id);
+        option.disabled = complete;
+        return option;
+      }));
+    }
+    if (selector.value !== selected) selector.value = selected;
     say('event', state?.eventName || 'Raffle Draw');
     for (const key of ['total', 'eligible', 'won']) say(key, state ? number.format(state[key]) : '—');
     $('settings-open').disabled = !state || mutation;
@@ -313,8 +329,12 @@ function startOperator() {
       buttons.className = 'prize-actions';
       buttons.append(edit, reset);
       actions.append(buttons);
+      const status = node('span', prize.remaining ? 'Open' : 'Complete');
+      status.className = prize.remaining ? 'prize-status' : 'prize-status is-complete';
+      const statusCell = document.createElement('td');
+      statusCell.append(status);
       row.append(node('td', prize.name), awarded, node('td', number.format(prize.perDraw)),
-        node('td', number.format(prize.remaining)), node('td', prize.remaining ? 'Open' : 'Complete'), actions);
+        node('td', number.format(prize.remaining)), statusCell, actions);
       return row;
     }));
     showMessage('prize-empty', prizes.length ? '' : state ? 'Add the first prize to start drawing.' : 'Prizes will appear after you connect.');
@@ -355,10 +375,10 @@ function startOperator() {
     say('next', run?.index + 1 === run?.receipt.count ? 'Finish draw' : 'Next winner');
     say('pause', run?.pausedAt ? 'Resume' : 'Pause');
     if (!run) {
-      const label = prize ? 'Ready to draw' : 'Awaiting a prize';
+      const label = prize ? 'Ready to draw' : 'Waiting for a prize';
       reel.idle(label);
       say('stage-status', prize?.name || 'Standby');
-      say('stage-caption', state ? (prize ? 'Choose Draw winners when the audience is ready' : 'Set up a prize to begin') : 'Connect your spreadsheet to begin');
+      say('stage-caption', state ? (prize ? 'Choose Draw winners to begin' : 'Set up a prize to begin') : 'Connect Google Sheets to load your prizes');
     }
     publish();
   }
