@@ -113,14 +113,15 @@
           <option value="auto">Automatic</option>
           <option value="manual">Manual</option>
         </select>
-        <button id="projector-draw" type="button" disabled>Draw</button>
-        <button id="projector-next" type="button" hidden>Next winner</button>
-        <p id="projector-hold-note" class="hint" role="status" hidden></p>
       </section>
     </div>
     <div class="projector-main" id="projector-stage">
       <p id="projector-position" hidden></p>
       <div class="reel" aria-hidden="true"></div>
+      <div class="projector-action" id="projector-action" hidden>
+        <button id="projector-action-button" type="button" aria-describedby="projector-hold-note" disabled>Draw</button>
+        <p id="projector-hold-note" role="status" hidden></p>
+      </div>
       <p id="projector-caption" aria-live="polite"></p>
     </div>
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>

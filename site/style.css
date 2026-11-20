@@ -999,7 +999,7 @@ dialog .error {
   --ticket-width: 860px;
   --ticket-text-width: 645px;
   display: grid;
-  grid-template-rows: minmax(1.5rem, auto) auto minmax(1.5rem, auto);
+  grid-template-rows: minmax(1.5rem, auto) auto auto minmax(1.5rem, auto);
   align-self: center;
   width: min(100%, 1200px);
   min-width: 0;
@@ -1017,7 +1017,7 @@ dialog .error {
   grid-row: 1;
 }
 #projector-caption {
-  grid-row: 3;
+  grid-row: 4;
 }
 #projector-caption[data-announcement-only] {
   position: absolute;
@@ -1114,7 +1114,8 @@ dialog .error {
   overflow: auto;
 }
 #projector:fullscreen #fullscreen,
-.projector-tools {
+.projector-tools,
+#projector:not(:fullscreen) .projector-action {
   display: none;
 }
 #projector:fullscreen .projector-tools {
@@ -1172,14 +1173,40 @@ dialog .error {
   appearance: auto;
   padding-inline: 9px;
 }
-#projector :is(#projector-draw, #projector-next):enabled {
-  background: var(--ticket-gold);
-  border-color: var(--ticket-gold);
-  color: #311c23;
+.projector-action {
+  grid-row: 3;
+  justify-self: center;
+  position: relative;
+  color: var(--stage-muted);
 }
-#projector :is(#projector-draw, #projector-next):enabled:hover {
-  background: #ffe3a7;
-  border-color: #ffe3a7;
+.projector-main .reel:not([data-phase="spin"]) + .projector-action {
+  margin-block-start: -44px;
+}
+#projector:fullscreen .reel[data-phase="landed"] {
+  grid-template-rows: minmax(56px, 1fr) auto minmax(56px, 1fr);
+}
+#projector #projector-action-button {
+  min-width: 8.25rem;
+  min-height: 44px;
+  padding: 0.45rem 1.1rem;
+  border-radius: 999px;
+  border-color: #bd9658;
+  background-color: #26171c;
+  color: var(--ticket-gold);
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+}
+#projector #projector-action-button:hover:not(:disabled) {
+  border-color: var(--ticket-gold);
+  background-color: #4c2530;
+  color: var(--projector-ivory);
+}
+#projector-hold-note {
+  margin-block-start: 8px;
+  font-size: 0.8125rem;
+}
+#projector:fullscreen .projector-action:not([hidden]) + #projector-caption:not([data-announcement-only]) {
+  margin-block-start: 8px;
 }
 @media (max-width: 680px) {
   #projector {

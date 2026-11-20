@@ -46,8 +46,7 @@ if (isProjector) {
   const channel = new BroadcastChannel('raffle-projector-' + audience);
   const reel = new Reel($('projector-stage').querySelector('.reel'));
   const projector = $('projector');
-  const drawButton = $('projector-draw');
-  const nextButton = $('projector-next');
+  const actionButton = $('projector-action-button');
   const advanceSelect = $('projector-advance');
   const controls = $('projector-controls');
   const toggle = $('projector-toggle');
@@ -72,14 +71,16 @@ if (isProjector) {
     cancelAnimationFrame(frame);
     const { eventName, prizeName, run, advance, advanceEditable, drawTx, remote, nextReady } = live;
     $('projector-remote').hidden = !remote;
-    drawButton.disabled = !drawTx;
     advanceSelect.disabled = !advanceEditable;
     advanceSelect.value = advance || 'auto';
-    const manual = !remote && run?.advance === 'manual' && (run.phase === 'spin' || run.phase === 'hold');
-    nextButton.hidden = !manual;
-    nextButton.disabled = !manual || !nextReady;
-    showMessage('projector-hold-note', manual && run.phase === 'hold' && !nextReady ? holdMessage : '');
-    if (manual) say('projector-next', run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner');
+    const revealing = run?.phase === 'spin' || run?.phase === 'hold';
+    const manualHold = !remote && run?.phase === 'hold' && run.advance === 'manual';
+    $('projector-action').hidden = !!remote;
+    actionButton.disabled = remote || (revealing ? !manualHold || !nextReady : !drawTx);
+    let actionLabel = revealing ? 'Drawing…' : 'Draw';
+    if (manualHold) actionLabel = run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner';
+    say('projector-action-button', actionLabel);
+    showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
     $('projector-caption').toggleAttribute('data-announcement-only', run?.phase === 'hold');
@@ -126,15 +127,15 @@ if (isProjector) {
     if (document.fullscreenElement !== projector || advanceSelect.disabled) return;
     channel.postMessage({ type: 'advance', value: advanceSelect.value });
   });
-  drawButton.addEventListener('click', () => {
-    if (document.fullscreenElement !== projector || drawButton.disabled) return;
-    drawButton.disabled = true;
-    channel.postMessage({ type: 'draw', tx: live.drawTx });
-  });
-  nextButton.addEventListener('click', () => {
-    if (document.fullscreenElement !== projector || nextButton.disabled) return;
-    nextButton.disabled = true;
-    channel.postMessage({ type: 'next', tx: live.run.receipt.tx, index: live.run.index });
+  actionButton.addEventListener('click', () => {
+    if (document.fullscreenElement !== projector || actionButton.disabled) return;
+    actionButton.disabled = true;
+    const { run, drawTx } = live;
+    if (run?.phase === 'hold') {
+      channel.postMessage({ type: 'next', tx: run.receipt.tx, index: run.index });
+    } else {
+      channel.postMessage({ type: 'draw', tx: drawTx });
+    }
   });
 } else {
   startOperator();
