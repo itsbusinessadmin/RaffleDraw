@@ -579,8 +579,8 @@ footer {
   line-height: 1.4;
   margin: 7px 0 14px;
 }
-.controls .options {
-  margin: 5px 0 18px;
+.controls > #advance {
+  margin-bottom: 18px;
 }
 .options {
   display: grid;

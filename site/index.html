@@ -48,10 +48,8 @@
             <label for="prize-select">Prize</label>
             <select id="prize-select" disabled><option>Select a prize</option></select>
             <p id="slots" class="hint">Connect to load your prizes.</p>
-            <div class="options">
-              <div><label for="speed">Reveal speed</label><select id="speed"><option value="standard">Standard</option><option value="fast">Fast</option></select></div>
-              <div><label for="advance">Advance</label><select id="advance"><option value="auto">Automatic</option><option value="manual">Manual</option></select></div>
-            </div>
+            <label for="advance">Advance</label>
+            <select id="advance"><option value="auto">Automatic</option><option value="manual">Manual</option></select>
             <button id="draw" class="primary" type="button" disabled>Draw winners</button>
             <div id="reveal-actions" class="reveal-actions" hidden>
               <button id="pause" type="button">Pause</button>
@@ -192,7 +190,7 @@
       <p class="hint">Column headings come from row 1 of ALL IMS.</p>
       <label for="reveal-seconds">Reveal speed (seconds)</label>
       <input id="reveal-seconds" type="number" min="1" max="60" step="0.1" required aria-describedby="reveal-seconds-hint">
-      <p id="reveal-seconds-hint" class="hint">Sets the Standard spin duration. Fast uses its preset.</p>
+      <p id="reveal-seconds-hint" class="hint">Sets how long the reel spins before revealing a winner.</p>
       <p class="error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save settings</button></div>
     </form>

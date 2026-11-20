@@ -674,7 +674,7 @@ function startOperator() {
   }
 
   function begin(receipt, options = {}) {
-    const speed = options.speed || $('speed').value;
+    const speed = options.speed || 'standard';
     run = {
       receipt, speed, advance: options.advance || $('advance').value, index: 0,
       phase: 'spin', start: Date.now(),
@@ -687,7 +687,7 @@ function startOperator() {
   function startDraw() {
     if (!offeredDraw || pending()) return;
     commitDraw({
-      ...offeredDraw, started: Date.now(), speed: $('speed').value, advance: $('advance').value,
+      ...offeredDraw, started: Date.now(), advance: $('advance').value,
       revealSeconds: state?.revealSeconds ?? DEFAULT_REVEAL_SECONDS
     });
   }
@@ -938,7 +938,7 @@ function startOperator() {
     revealSeconds.disabled = !Number.isFinite(state.revealSeconds);
     say('reveal-seconds-hint', revealSeconds.disabled
       ? 'Deploy the updated Apps Script version to set the spin duration.'
-      : 'Sets the Standard spin duration. Fast uses its preset.');
+      : 'Sets how long the reel spins before revealing a winner.');
     formError($('settings-form'));
     $('settings-dialog').showModal();
   });
