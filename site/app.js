@@ -102,6 +102,7 @@ function startOperator() {
   const scope = 'raffle:' + location.pathname + ':';
   const savedEndpoint = scope + 'endpoint';
   const sessionKey = scope + 'connection';
+  const rememberedKey = scope + 'remembered-connection';
   const projectorKey = scope + 'projector';
   const projectorId = sessionStorage.getItem(projectorKey) || crypto.randomUUID();
   sessionStorage.setItem(projectorKey, projectorId);
@@ -215,7 +216,15 @@ function startOperator() {
     renderDashboard();
   }
 
-  function endSession() {
+  function connectionRecord() {
+    return JSON.stringify({ endpoint, token });
+  }
+
+  function endSession(forget = true) {
+    if (forget && localStorage.getItem(rememberedKey) === connectionRecord()) {
+      // A signed-out marker keeps older tabs from restoring a legacy tab session.
+      localStorage.setItem(rememberedKey, 'null');
+    }
     sessionStorage.removeItem(sessionKey);
     token = '';
     refreshSequence++;
@@ -504,7 +513,7 @@ function startOperator() {
     try {
       const receipt = await api('draw', { tx: request.tx, prizeId: request.prizeId });
       clearPending(request.tx);
-      begin(receipt, request);
+      if (token) begin(receipt, request);
     } catch (error) {
       const definitive = ['VALIDATION', 'NOT_FOUND', 'CONFLICT'].includes(error.code);
       if (definitive) clearPending(request.tx);
@@ -674,8 +683,8 @@ function startOperator() {
   window.addEventListener('hashchange', updateNavigation);
   updateNavigation();
   $('connection').addEventListener('click', () => {
+    if (mutation) return;
     if (token) {
-      if (mutation) return;
       $('disconnect-dialog').showModal();
       renderControls();
       return;
@@ -702,8 +711,9 @@ function startOperator() {
       const result = await api('state', {}, url, key);
       endpoint = url;
       localStorage.setItem(savedEndpoint, url);
-      sessionStorage.setItem(sessionKey, JSON.stringify({ endpoint: url, token: key }));
       token = key;
+      localStorage.setItem(rememberedKey, connectionRecord());
+      sessionStorage.removeItem(sessionKey);
       $('token').value = '';
       $('connect-dialog').close();
       say('connection', 'Disconnect');
@@ -813,20 +823,28 @@ function startOperator() {
     if (!document.hidden && token && !mutation) refresh();
   });
   window.addEventListener('storage', event => {
+    if (event.storageArea !== localStorage) return;
+    if (token && (event.key === rememberedKey || event.key === null) &&
+        localStorage.getItem(rememberedKey) !== connectionRecord()) {
+      endSession(false);
+    }
     if (event.key?.startsWith(pendingPrefix())) renderControls();
   });
   setInterval(() => {
     if (!document.hidden && !mutation && token) refresh();
   }, 30000);
+  const remembered = localStorage.getItem(rememberedKey);
   try {
-    const saved = JSON.parse(sessionStorage.getItem(sessionKey));
+    const saved = JSON.parse(remembered ?? sessionStorage.getItem(sessionKey));
     if (typeof saved?.token === 'string' && /^[0-9a-f]{64}$/.test(saved.token)) {
       endpoint = apiURL(saved.endpoint);
       token = saved.token;
+      if (remembered === null) localStorage.setItem(rememberedKey, connectionRecord());
     }
   } catch (_) {
-    sessionStorage.removeItem(sessionKey);
+    // An unreadable saved connection requires a new sign-in.
   }
+  sessionStorage.removeItem(sessionKey);
   if (token) {
     connectionStatus('Reconnecting…', 'checking');
     say('connection', 'Disconnect');
