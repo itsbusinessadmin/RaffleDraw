@@ -74,6 +74,7 @@ if (isProjector) {
     if (manual) say('projector-next', run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner');
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
+    $('projector-caption').toggleAttribute('data-announcement-only', run?.phase === 'hold');
     if (!run) {
       reel.idle('Ready for the draw');
       showMessage('projector-position');

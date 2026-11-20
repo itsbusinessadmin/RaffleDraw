@@ -1014,6 +1014,14 @@ dialog .error {
 #projector-caption {
   grid-row: 3;
 }
+#projector-caption[data-announcement-only] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .projector-main .reel {
   grid-row: 2;
   height: calc(2.8 * var(--row));
