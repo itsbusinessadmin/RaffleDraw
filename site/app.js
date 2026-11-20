@@ -83,7 +83,9 @@ if (isProjector) {
     showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
-    $('projector-caption').toggleAttribute('data-announcement-only', run?.phase === 'hold');
+    const caption = $('projector-caption');
+    caption.toggleAttribute('data-announcement-only', run?.phase === 'hold');
+    caption.toggleAttribute('data-drawing', run?.phase === 'spin' && !run.pausedAt);
     if (!run) {
       reel.idle('Ready for the draw');
       showMessage('projector-position');

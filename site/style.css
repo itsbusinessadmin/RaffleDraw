@@ -1019,7 +1019,8 @@ dialog .error {
 #projector-caption {
   grid-row: 4;
 }
-#projector-caption[data-announcement-only] {
+#projector-caption[data-announcement-only],
+#projector:fullscreen .projector-action:not([hidden]) + #projector-caption[data-drawing] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1205,7 +1206,7 @@ dialog .error {
   margin-block-start: 8px;
   font-size: 0.8125rem;
 }
-#projector:fullscreen .projector-action:not([hidden]) + #projector-caption:not([data-announcement-only]) {
+#projector:fullscreen .projector-action:not([hidden]) + #projector-caption:not([data-announcement-only], [data-drawing]) {
   margin-block-start: 8px;
 }
 @media (max-width: 680px) {
