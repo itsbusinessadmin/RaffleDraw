@@ -405,12 +405,15 @@ function startOperator() {
   for (const button of document.querySelectorAll('[data-close]')) {
     button.addEventListener('click', () => button.closest('dialog').close());
   }
-  for (const link of navLinks) {
-    link.addEventListener('click', () => {
-      navLinks.forEach(item => item.removeAttribute('aria-current'));
-      link.setAttribute('aria-current', 'location');
-    });
+  function updateNavigation() {
+    const locationHash = location.hash || '#draw-section';
+    for (const link of navLinks) {
+      if (link.hash === locationHash) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    }
   }
+  window.addEventListener('hashchange', updateNavigation);
+  updateNavigation();
   $('connection').addEventListener('click', () => {
     if (token) {
       if (mutation) return;
