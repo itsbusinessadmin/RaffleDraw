@@ -84,9 +84,11 @@ if (isProjector) {
     let actionLabel = revealing ? 'Drawing…' : 'Draw';
     if (manualHold) actionLabel = run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner';
     say('projector-action-button', actionLabel);
-    showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
-    redrawButton.hidden = !live.canRedraw && !live.redrawPrompt;
+    const redrawRequiresUpdate = live.redrawSupported === false;
+    const redrawUpdateMessage = 'Deploy the updated Google Apps Script to enable Re-draw.';
+    showMessage('projector-hold-note', redrawRequiresUpdate ? redrawUpdateMessage : manualHold && !nextReady ? holdMessage : '');
     redrawButton.disabled = !live.canRedraw;
+    redrawButton.title = live.canRedraw ? '' : redrawRequiresUpdate ? redrawUpdateMessage : 'Available while a winner is on the ticket.';
     if (live.redrawPrompt && document.fullscreenElement === projector) {
       say('redraw-warning', 'Replace “' + run.receipt.winners[run.index] +
         '” for this prize? A different eligible participant will take this winning spot in Google Sheets.');
@@ -298,7 +300,8 @@ function startOperator() {
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
       drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
       advanceEditable: !!state && !!token && !active() && !mutation,
-      nextReady: canAdvance(), canRedraw: canPromptRedraw(), redrawPrompt, redrawError,
+      nextReady: canAdvance(), canRedraw: canPromptRedraw(), redrawSupported: state ? !!state.redrawMode : null,
+      redrawPrompt, redrawError,
       redrawBusy: redrawPrompt && mutation, redrawPending: redrawPrompt && !!pendingRedraw()
     });
   }
