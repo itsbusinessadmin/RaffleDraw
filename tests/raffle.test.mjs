@@ -182,6 +182,52 @@ test('prize reset identifies unmatched IDs and restores winners across blank row
   assert.deepEqual(app.data(name), [header]);
 });
 
+test('prize reset recovers an empty two-column prize tab from the winner ledger', () => {
+  const app = fixture();
+  app.initialize();
+  const header = ['Name', 'Participant ID'];
+  const entrants = [['Same name', '0001'], ['Same name', '0002'], ['Three', '0003'],
+    ['Four', '0004'], ['Five', '0005'], ['Six', '0006']];
+  app.loadRoster([header, ...entrants]);
+  const otherId = ok(app.request('prize', { name: 'Other Prize', limit: 1, perDraw: 1 })).id;
+  ok(app.request('draw', { tx: randomUUID(), prizeId: otherId }));
+  const name = 'Wireless Vacuum';
+  const prizeId = ok(app.request('prize', { name, limit: 4, perDraw: 4 })).id;
+  const throughTx = randomUUID();
+  ok(app.request('draw', { tx: throughTx, prizeId }));
+  const expected = [...app.data('ALL IMS'), ...app.data(name).slice(1)];
+  const otherRows = app.data('Other Prize');
+  app.loadRows(name, [header]);
+
+  const reset = { prizeId, throughTx };
+  assert.equal(ok(app.request('resetPrize', reset)).restored, 4);
+  assert.deepEqual(app.data('ALL IMS'), expected);
+  assert.deepEqual(app.data('Other Prize'), otherRows);
+  assert.deepEqual(app.data(name), [header]);
+  const state = ok(app.request('state'));
+  assert.deepEqual([state.eligible, state.won], [5, 1]);
+  assert.equal(state.prizes.find(prize => prize.id === prizeId).remaining, 4);
+  assert.equal(app.request('draw', { tx: throughTx, prizeId }).code, 'CONFLICT');
+  assert.equal(ok(app.request('resetPrize', reset)).restored, 0);
+});
+
+test('prize reset requires a backup for an empty tab whose roster has additional fields', () => {
+  const app = fixture();
+  app.initialize();
+  const header = ['Name', 'Participant ID', 'Team'];
+  app.loadRoster([header, ['One', '001', 'Red']]);
+  const name = 'Grand Prize';
+  const prizeId = ok(app.request('prize', { name, limit: 1, perDraw: 1 })).id;
+  const throughTx = randomUUID();
+  ok(app.request('draw', { tx: throughTx, prizeId }));
+  app.loadRows(name, [header]);
+  const writes = app.writes();
+  assert.equal(app.request('resetPrize', { prizeId, throughTx }).code, 'INTEGRITY');
+  assert.equal(app.writes(), writes);
+  assert.deepEqual(app.data('ALL IMS'), [header]);
+  assert.equal(ok(app.request('state')).won, 1);
+});
+
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {
   const steps = 52;
   const sequence = Array.from({ length: 11 }, (_, i) => positionAt(i / 10, steps));

@@ -231,7 +231,8 @@ function database_(id) {
   const nameColumn = headers.indexOf(nameHeader);
   const idColumn = headers.indexOf(ID_HEADER);
   if (new Set(usedHeaders).size !== usedHeaders.length) fail_('INTEGRITY', 'ALL IMS has duplicate column headers.');
-  const winnerList = data.DRAW_WINNERS.slice(1).map(([tx, prizeId, id, name, position]) => ({ tx, prizeId, id: String(id), name, position }));
+  const winnerList = data.DRAW_WINNERS.slice(1).map(([tx, prizeId, id, name, position]) =>
+    ({ tx, prizeId, id: String(id ?? '').trim(), name, position }));
   const winnerIds = new Set(winnerList.map(winner => winner.id));
   const winnerCounts = new Map();
   const winnersByDraw = new Map();
@@ -398,23 +399,29 @@ function resetPrize_(db, input) {
   });
   const recordIndexes = [];
   const unmatchedRows = [];
-  let rosterDuplicate = false;
   for (let index = 1; index < records.length; index++) {
     const row = records[index] || [];
     if (!row.some(value => value !== undefined && value !== null && value !== '')) continue;
     recordIndexes.push(index);
     const participantId = String(row[db.idColumn] ?? '').trim();
     if (!winnerIds.delete(participantId)) unmatchedRows.push(index + 1);
-    if (db.activeIds.has(participantId)) rosterDuplicate = true;
   }
-  if (unmatchedRows.length || winnerIds.size) {
+  // An empty prize tab can be rebuilt from the ledger only when it contains every roster field.
+  const recoverFromLedger = !recordIndexes.length && width === 2 && db.nameHeader === 'Name' &&
+    db.headers[0] === 'Name' && db.idColumn === 1 && db.data[ROSTER].every(row => row.length <= 2);
+  if (!recoverFromLedger && (unmatchedRows.length || winnerIds.size)) {
     const counts = 'The prize worksheet has ' + recordIndexes.length + (recordIndexes.length === 1 ? ' row' : ' rows') +
       ' with data. DRAW_WINNERS lists ' + winnerRows.length + (winnerRows.length === 1 ? ' winner' : ' winners') + ' for this prize.';
     const affected = unmatchedRows.length ? ' Check for missing, duplicate, or unexpected Participant IDs on prize worksheet rows ' +
       unmatchedRows.slice(0, 8).join(', ') + (unmatchedRows.length > 8 ? ', and others.' : '.') : '';
     fail_('INTEGRITY', counts + affected + ' Compare those records with DRAW_WINNERS before retrying.');
   }
-  if (rosterDuplicate) {
+  const winners = winnerRows.map(index => db.winnerList[index - 1]);
+  if (recoverFromLedger && winners.some(winner =>
+    !winner.id || typeof winner.name !== 'string' || !winner.name.trim() || winner.name.length > 500)) {
+    fail_('INTEGRITY', 'DRAW_WINNERS is missing a valid name or Participant ID for this prize. Restore the prize records from a backup before resetting.');
+  }
+  if (winners.some(winner => db.activeIds.has(winner.id))) {
     fail_('INTEGRITY', 'ALL IMS already contains a winner from this prize. Resolve the duplicate record before resetting.');
   }
   const outputMeta = db.bookSheets.find(sheet => sheet.properties.sheetId === output.sheetId);
@@ -424,7 +431,10 @@ function resetPrize_(db, input) {
 
   const requests = [];
   const rosterEnd = db.data[ROSTER].length;
-  resize_(requests, roster, rosterEnd + recordIndexes.length, width);
+  resize_(requests, roster, rosterEnd + winners.length, width);
+  if (recoverFromLedger) {
+    requests.push(write_(roster.sheetId, rosterEnd, 0, winners.map(winner => [winner.name, winner.id])));
+  }
   for (let i = 0; i < recordIndexes.length;) {
     const startRowIndex = recordIndexes[i];
     const startDestination = rosterEnd + i;
@@ -437,8 +447,8 @@ function resetPrize_(db, input) {
     }
   }
   const ledger = db.tabs.DRAW_WINNERS;
-  for (const sheet of [output, ledger]) {
-    resize_(requests, sheet, recordIndexes.length + (sheet.gridProperties.frozenRowCount || 0) + 1, 0);
+  for (const [sheet, count] of [[output, recordIndexes.length], [ledger, winnerRows.length]]) {
+    resize_(requests, sheet, count + (sheet.gridProperties.frozenRowCount || 0) + 1, 0);
   }
   deleteRows_(requests, output, recordIndexes);
   deleteRows_(requests, ledger, winnerRows);
@@ -446,7 +456,7 @@ function resetPrize_(db, input) {
   requests.push(write_(db.tabs.DRAW_HISTORY.sheetId, 1, SYSTEM.DRAW_HISTORY.length - 1,
     db.history.map(draw => [draw.prizeId === prize.id ? 0 : draw.count])));
   commit_(db, requests);
-  return { restored: recordIndexes.length };
+  return { restored: winners.length };
 }
 
 function receipt_(db, draw, reelNames) {
