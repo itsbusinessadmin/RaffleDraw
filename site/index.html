@@ -70,8 +70,19 @@
         <div><dt>Unique winners</dt><dd id="won">—</dd></div>
       </dl>
       <section class="dashboard-section" id="prizes-section" aria-labelledby="prizes-heading">
-        <div class="section-head"><h2 id="prizes-heading">Prizes</h2><button id="prize-add" type="button" disabled>Add prize</button></div>
-        <div class="table-wrap" role="region" aria-label="Prizes table" tabindex="0">
+        <div class="section-head">
+          <h2 id="prizes-heading">Prizes</h2>
+          <div class="actions">
+            <button id="prize-add" type="button" disabled>Add prize</button>
+            <button id="prizes-toggle" type="button" aria-label="Collapse prize list" aria-controls="prizes-panel" aria-expanded="true" title="Collapse prize list"></button>
+          </div>
+        </div>
+        <div id="archive-feedback" class="notice archive-feedback" hidden>
+          <p id="archive-message" role="status"></p>
+          <button id="archive-undo" class="quiet" type="button">Undo</button>
+        </div>
+        <p id="archive-error" class="notice error" role="alert" hidden></p>
+        <div class="table-wrap" id="prizes-panel" role="region" aria-label="Prizes table" tabindex="0">
           <table><thead><tr><th scope="col">Prize</th><th scope="col">Awarded</th><th scope="col">Per draw</th><th scope="col">Remaining</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody id="prizes"></tbody></table>
           <p class="empty" id="prize-empty">Prizes will appear after you connect.</p>
         </div>

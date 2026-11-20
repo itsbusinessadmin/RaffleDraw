@@ -624,6 +624,23 @@ footer {
 .section-head input {
   max-width: 245px;
 }
+#prizes-toggle {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  padding: 0;
+}
+#prizes-toggle::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+#prizes-toggle[aria-expanded="true"]::before {
+  transform: translateY(2px) rotate(225deg);
+}
 .table-wrap {
   position: relative;
   overflow-x: auto;
@@ -688,13 +705,48 @@ td:first-child {
   justify-content: flex-end;
   gap: 6px;
 }
-.reset-prize {
+.reset-prize,
+.archive-prize {
   display: grid;
   flex: 0 0 34px;
   place-items: center;
   position: relative;
   padding: 0;
+}
+.reset-prize {
   color: var(--danger);
+}
+.archive-prize {
+  color: var(--accent-strong);
+}
+.archive-prize::before {
+  content: "";
+  width: 13px;
+  height: 9px;
+  margin-top: 4px;
+  border: 1.5px solid currentColor;
+  border-radius: 0 0 3px 3px;
+}
+.archive-prize::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 7px);
+  width: 17px;
+  height: 5px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  background: inherit;
+}
+.archive-feedback {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.archive-feedback button {
+  flex-shrink: 0;
+  color: var(--accent-strong);
 }
 .reset-prize:hover:not(:disabled) {
   border-color: var(--danger);

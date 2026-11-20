@@ -228,6 +228,41 @@ test('prize reset requires a backup for an empty tab whose roster has additional
   assert.equal(ok(app.request('state')).won, 1);
 });
 
+test('archiving a prize preserves its records and blocks new draws until restored', () => {
+  const app = fixture();
+  app.initialize();
+  app.loadRoster([['Name', 'Participant ID'], ['One', '001'], ['Two', '002']]);
+  const name = 'Grand Prize';
+  const prizeId = ok(app.request('prize', { name, limit: 2, perDraw: 1 })).id;
+  const first = { prizeId, tx: randomUUID() };
+  const receipt = ok(app.request('draw', first));
+  const rosterBefore = app.data('ALL IMS');
+  const prizeBefore = app.data(name);
+  const historyBefore = ok(app.request('state')).history;
+  const archive = { prizeId, archived: true };
+  assert.equal(app.request('archivePrize', archive, 'wrong').code, 'UNAUTHORIZED');
+  assert.equal(app.request('archivePrize', { ...archive, archived: 'true' }).code, 'VALIDATION');
+
+  app.fail('after');
+  assert.equal(app.request('archivePrize', archive).code, 'BACKEND_ERROR');
+  const writes = app.writes();
+  assert.equal(ok(app.request('archivePrize', archive)).archived, true);
+  assert.equal(app.writes(), writes);
+  const state = ok(app.request('state'));
+  assert.equal(state.prizes[0].archived, true);
+  assert.deepEqual(state.history, historyBefore);
+  assert.deepEqual(app.data('ALL IMS'), rosterBefore);
+  assert.deepEqual(app.data(name), prizeBefore);
+  assert.deepEqual(ok(app.request('draw', first)).winners, receipt.winners);
+  const second = { prizeId, tx: randomUUID() };
+  assert.equal(app.request('draw', second).code, 'VALIDATION');
+  assert.equal(app.request('resetPrize', { prizeId, throughTx: first.tx }).code, 'VALIDATION');
+
+  assert.equal(ok(app.request('archivePrize', { prizeId, archived: false })).archived, false);
+  assert.equal(ok(app.request('state')).prizes[0].archived, false);
+  assert.equal(ok(app.request('draw', second)).count, 1);
+});
+
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {
   const steps = 52;
   const sequence = Array.from({ length: 11 }, (_, i) => positionAt(i / 10, steps));

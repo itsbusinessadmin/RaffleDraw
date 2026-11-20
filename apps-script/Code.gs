@@ -2,6 +2,7 @@ const PRODUCTION_SHEET = '10pY8HUtzIEznO9bbK_A5Ub5uQLfiELMsHqfuU1l6arY';
 const ROSTER = 'ALL IMS';
 const ID_HEADER = 'Participant ID';
 const GUARD = 'RAFFLE_WRITE_VERSION';
+const ARCHIVED_PRIZE = 'archivedPrize:';
 const SYSTEM = {
   SETTINGS: ['key', 'value'],
   PRIZES: ['prizeId', 'sheetId', 'name', 'limit', 'perDraw', 'createdAt'],
@@ -265,12 +266,14 @@ function database_(id) {
     if (!name || name.length > 500) { invalid++; return; }
     eligible.push({ row: offset + 1, id: participantId, name });
   });
+  const settings = new Map(data.SETTINGS.slice(3));
   const prizes = data.PRIZES.slice(1).map(([id, sheetId, name, limit, perDraw, at], index) => {
     const sheet = tabs[name];
     const won = winnerCounts.get(id) || 0;
     if (!sheet || sheet.sheetId !== sheetId || !Number.isSafeInteger(limit) || !Number.isSafeInteger(perDraw) ||
         perDraw < 1 || perDraw > limit || won > limit) fail_('INTEGRITY', 'A prize record or worksheet has changed outside the app.');
-    return { id, sheetId, name, limit, perDraw, at, won, remaining: limit - won, index: index + 1 };
+    const archived = settings.get(ARCHIVED_PRIZE + id) === true;
+    return { id, sheetId, name, limit, perDraw, at, won, remaining: limit - won, archived, index: index + 1 };
   });
   if (new Set(prizes.map(prize => prize.id)).size !== prizes.length ||
       [...winnerCounts.keys()].some(id => !prizes.some(prize => prize.id === id))) {
@@ -286,6 +289,7 @@ function dispatch_(cfg, input) {
     case 'state': return state_(db);
     case 'settings': return saveSettings_(db, input);
     case 'prize': return savePrize_(db, input);
+    case 'archivePrize': return archivePrize_(db, input);
     case 'resetPrize': return resetPrize_(db, input);
     case 'draw': return draw_(db, cfg.random, input);
     case 'receipt': {
@@ -361,6 +365,25 @@ function tx_(value) {
   return value.toLowerCase();
 }
 
+function archivePrize_(db, input) {
+  const prize = db.prizes.find(item => item.id === input.prizeId);
+  if (!prize) fail_('NOT_FOUND', 'Prize not found.');
+  const { archived } = input;
+  if (typeof archived !== 'boolean') fail_('VALIDATION', 'Choose whether to archive or restore the prize.');
+  if (prize.archived === archived) return { archived };
+
+  const settings = db.tabs.SETTINGS;
+  const key = ARCHIVED_PRIZE + prize.id;
+  const rows = db.data.SETTINGS;
+  const existing = rows.findIndex(([name]) => name === key);
+  const index = existing < 0 ? rows.length : existing;
+  const requests = [];
+  resize_(requests, settings, index + 1, SYSTEM.SETTINGS.length);
+  requests.push(write_(settings.sheetId, index, 0, [[key, archived]]));
+  commit_(db, requests);
+  return { archived };
+}
+
 function deleteRows_(requests, sheet, indexes) {
   const rows = indexes.slice().sort((a, b) => b - a);
   for (let i = 0; i < rows.length;) {
@@ -379,6 +402,7 @@ function resetPrize_(db, input) {
   const throughTx = tx_(input.throughTx);
   const confirmed = db.history.find(draw => draw.tx === throughTx && draw.prizeId === prize.id);
   if (confirmed?.count === 0) return { restored: 0 };
+  if (prize.archived) fail_('VALIDATION', 'Restore this archived prize before resetting it.');
   const draws = db.history.filter(draw => draw.prizeId === prize.id && draw.count);
   if (draws.at(-1)?.tx !== throughTx) fail_('CONFLICT', 'This prize changed. Refresh data and confirm the reset again.');
 
@@ -504,6 +528,7 @@ function draw_(db, key, input) {
   }
   const prize = db.prizes.find(item => item.id === input.prizeId);
   if (!prize) fail_('NOT_FOUND', 'Select an existing prize.');
+  if (prize.archived) fail_('VALIDATION', 'This prize is archived. Select another prize.');
   if (db.source.merges?.length) fail_('VALIDATION', 'Unmerge ALL IMS cells before drawing.');
   if (db.invalid) fail_('VALIDATION', 'Check the name column and fix incomplete participant rows before drawing.');
   if (db.excluded) fail_('VALIDATION', 'ALL IMS includes previous winners. Remove those re-imported records before drawing.');

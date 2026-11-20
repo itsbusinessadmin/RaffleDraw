@@ -119,6 +119,7 @@ function startOperator() {
   let prizeOptionsKey = '';
   let editingPrize = '';
   let resetRequest = null;
+  let archiveUndo = null;
   let limit = 30;
   let run = null;
   let offeredDraw = null;
@@ -218,6 +219,8 @@ function startOperator() {
     refreshSequence++;
     state = null;
     run = null;
+    archiveUndo = null;
+    showMessage('archive-error');
     syncError = '';
     clearTimeout(advanceTimer);
     cancelAnimationFrame(frame);
@@ -269,7 +272,7 @@ function startOperator() {
   }
 
   function renderDashboard() {
-    const prizes = state?.prizes || [];
+    const prizes = state?.prizes.filter(prize => !prize.archived) || [];
     if (!prizes.some(prize => prize.id === selected && prize.remaining)) selected = prizes.find(prize => prize.remaining)?.id || '';
     const selector = $('prize-select');
     const options = prizes.map(({ id, name, remaining, won, limit }) => [id, name, !remaining, won, limit]);
@@ -324,10 +327,17 @@ function startOperator() {
         $('reset-dialog').showModal();
         renderControls();
       });
+      const archive = document.createElement('button');
+      archive.type = 'button';
+      archive.id = 'archive-' + prize.id;
+      archive.className = 'archive-prize';
+      archive.title = 'Archive ' + prize.name;
+      archive.setAttribute('aria-label', archive.title);
+      archive.addEventListener('click', () => setPrizeArchived(prize, true));
       const actions = document.createElement('td');
       const buttons = document.createElement('div');
       buttons.className = 'prize-actions';
-      buttons.append(edit, reset);
+      buttons.append(edit, reset, archive);
       actions.append(buttons);
       const status = node('span', prize.remaining ? 'Open' : 'Complete');
       status.className = prize.remaining ? 'prize-status' : 'prize-status is-complete';
@@ -337,7 +347,11 @@ function startOperator() {
         node('td', number.format(prize.remaining)), statusCell, actions);
       return row;
     }));
-    showMessage('prize-empty', prizes.length ? '' : state ? 'Add the first prize to start drawing.' : 'Prizes will appear after you connect.');
+    showMessage('prize-empty', prizes.length ? '' : !state ? 'Prizes will appear after you connect.' :
+      state.prizes.length ? 'All prizes are archived.' : 'Add the first prize to start drawing.');
+    if (!state?.prizes.some(prize => prize.id === archiveUndo?.id && prize.archived)) archiveUndo = null;
+    $('archive-feedback').hidden = !archiveUndo;
+    say('archive-message', archiveUndo ? 'Archived “' + archiveUndo.name + '”.' : '');
     const warnings = [];
     if (state?.invalid) warnings.push(number.format(state.invalid) + ' participant rows need a valid name. Review the name column in Settings.');
     if (state?.excluded) warnings.push(number.format(state.excluded) + ' previous winners are back in ALL IMS. Remove their re-imported rows before drawing.');
@@ -351,22 +365,27 @@ function startOperator() {
   }
 
   function renderControls() {
-    const prize = state?.prizes.find(item => item.id === selected);
+    const prizes = state?.prizes.filter(item => !item.archived) || [];
+    const prize = prizes.find(item => item.id === selected);
     const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, state?.eligible || 0);
     const waiting = token && pending();
     const confirming = $('disconnect-dialog').open || $('reset-dialog').open;
-    $('prize-select').disabled = !state?.prizes.length || mutation || !!active();
+    $('prize-select').disabled = !prizes.length || mutation || !!active();
     $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting || !!state?.invalid || !!state?.excluded;
     if ($('draw').disabled) offeredDraw = null;
     else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
     say('draw', mutation ? 'Saving…' : count ? 'Draw ' + number.format(count) + (count === 1 ? ' winner' : ' winners') : 'Draw winners');
     say('slots', prize ? number.format(prize.remaining) + ' winning slots remaining' :
       !state ? 'Connect to load your prizes.' :
-        state.prizes.length && state.prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
+        !prizes.length && state.prizes.length ? 'All prizes are archived.' :
+          prizes.length && prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
     $('retry').hidden = !waiting;
     $('retry').disabled = mutation || !!active();
     for (const button of document.querySelectorAll('.reset-prize')) {
       button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
+    }
+    for (const button of document.querySelectorAll('.archive-prize, #archive-undo')) {
+      button.disabled = mutation || !!active() || !!waiting;
     }
     $('reveal-actions').hidden = !active();
     $('pause').disabled = !active() || (run.phase === 'hold' && run.advance === 'manual');
@@ -456,6 +475,39 @@ function startOperator() {
       mutation = false;
       renderControls();
       await refresh(true);
+    }
+  }
+
+  async function setPrizeArchived(prize, archived) {
+    if (!prize || !token || mutation || active() || pending()) return;
+    mutation = true;
+    refreshSequence++;
+    showMessage('archive-error');
+    renderControls();
+    let changed = false;
+    try {
+      const result = await api('archivePrize', { prizeId: prize.id, archived });
+      if (result.archived !== archived) throw new Error('The API could not confirm the archive change. Refresh data and try again.');
+      const current = state?.prizes.find(item => item.id === prize.id);
+      if (!current) return;
+      current.archived = archived;
+      archiveUndo = archived ? current : null;
+      if (archived && run?.receipt.prizeId === prize.id) {
+        run = null;
+        renderResults('operator-results', null);
+      }
+      changed = true;
+    } catch (error) {
+      const message = error.code === 'BAD_REQUEST' && error.message === 'Unknown action.'
+        ? 'Deploy the updated Apps Script version to use prize archiving.' : error.message;
+      showMessage('archive-error', message);
+    } finally {
+      mutation = false;
+      renderDashboard();
+      if (document.activeElement === document.body) {
+        const target = changed && archived ? $('archive-undo') : $('archive-' + prize.id);
+        target?.focus({ preventScroll: true });
+      }
     }
   }
 
@@ -574,7 +626,17 @@ function startOperator() {
     event.preventDefault();
     saveForm(event.currentTarget, 'settings', { eventName: $('event-name').value, nameHeader: $('name-header').value });
   });
+  $('archive-undo').addEventListener('click', () => setPrizeArchived(archiveUndo, false));
   $('prize-add').addEventListener('click', () => openPrize());
+  $('prizes-toggle').addEventListener('click', event => {
+    const button = event.currentTarget;
+    const panel = $('prizes-panel');
+    panel.hidden = !panel.hidden;
+    const label = panel.hidden ? 'Expand prize list' : 'Collapse prize list';
+    button.setAttribute('aria-expanded', String(!panel.hidden));
+    button.setAttribute('aria-label', label);
+    button.title = label;
+  });
   $('prize-form').addEventListener('submit', event => {
     event.preventDefault();
     saveForm(event.currentTarget, 'prize', {

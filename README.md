@@ -55,6 +55,7 @@ Deploy the Worker and enter its root `https://…workers.dev/` URL in **Connect*
 - Choose a prize, reveal speed and advancement mode, then click **Draw** once. The entire award batch commits before the first reel starts. The batch size is the least of per-draw size, remaining prize slots, and eligible participants. **Pause**, **Skip spin**, **Next winner**, and **Reveal all** affect presentation only. Reduced-motion settings keep the result and sequence while skipping the spin.
 - If a request fails after you click Draw, use **Retry pending draw**. The browser saved its transaction ID before submitting. A recovered request returns the original results if already committed. You can reload the same tab and retry after the dashboard reconnects.
 - Completed prizes show their awarded count in the prize picker and cannot be selected. To reopen a prize, use its reset icon in the **Prizes** table and confirm. This returns all of that prize’s winners to **ALL IMS** and removes their wins from the dashboard history. Keep the prize worksheet and roster column layout intact so the records can be restored. Updating an existing installation requires deploying a new Apps Script version before using prize reset.
+- Use the archive icon beside reset to hide a prize from the table and draw picker while keeping its worksheet and winner history. Use **Undo** in the confirmation message to restore it. Prize archiving requires the updated Apps Script deployment.
 
 ### Record handling
 
