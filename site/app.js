@@ -3,6 +3,7 @@ import { Reel, duration, HOLD, DEFAULT_REVEAL_SECONDS, DEFAULT_NAMES_PER_SECOND 
 
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat();
+const holdMessage = 'You can continue after the winner display time.';
 const timingFields = [
   ['reveal-seconds', 'revealSeconds', DEFAULT_REVEAL_SECONDS],
   ['names-per-second', 'namesPerSecond', DEFAULT_NAMES_PER_SECOND],
@@ -69,14 +70,15 @@ if (isProjector) {
 
   function render() {
     cancelAnimationFrame(frame);
-    const { eventName, prizeName, run, advance, advanceEditable, drawTx, remote } = live;
+    const { eventName, prizeName, run, advance, advanceEditable, drawTx, remote, nextReady } = live;
     $('projector-remote').hidden = !remote;
     drawButton.disabled = !drawTx;
     advanceSelect.disabled = !advanceEditable;
     advanceSelect.value = advance || 'auto';
     const manual = !remote && run?.advance === 'manual' && (run.phase === 'spin' || run.phase === 'hold');
     nextButton.hidden = !manual;
-    nextButton.disabled = !manual || run.phase !== 'hold';
+    nextButton.disabled = !manual || !nextReady;
+    showMessage('projector-hold-note', manual && run.phase === 'hold' && !nextReady ? holdMessage : '');
     if (manual) say('projector-next', run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner');
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
@@ -250,7 +252,8 @@ function startOperator() {
       type: 'state', eventName: state?.eventName || 'Raffle Draw',
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
       drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
-      advanceEditable: !!state && !!token && !active() && !mutation
+      advanceEditable: !!state && !!token && !active() && !mutation,
+      nextReady: canAdvance()
     });
   }
 
@@ -358,7 +361,7 @@ function startOperator() {
       publish();
     }
     if (message?.type === 'next') {
-      if (run?.advance === 'manual' && run.phase === 'hold' &&
+      if (canAdvance() && run.advance === 'manual' &&
           message.tx === run.receipt.tx && message.index === run.index) next();
       else publish();
     }
@@ -574,6 +577,14 @@ function startOperator() {
     return run && (run.phase === 'spin' || run.phase === 'hold');
   }
 
+  function winnerTimeRemaining() {
+    return Math.max(0, run.start + run.hold - (run.pausedAt ?? Date.now()));
+  }
+
+  function canAdvance() {
+    return run?.phase === 'hold' && !run.pausedAt && winnerTimeRemaining() === 0;
+  }
+
   function renderBulkActions() {
     const unavailable = mutation || !!active() || !!(token && pending());
     const blocked = !selectedPrizes.size || unavailable;
@@ -627,7 +638,10 @@ function startOperator() {
     $('reveal-actions').hidden = !active();
     $('pause').disabled = !active() || (run.phase === 'hold' && run.advance === 'manual');
     $('skip').disabled = !active() || run.phase !== 'spin';
-    $('next').disabled = !active() || run.phase !== 'hold';
+    const waitingForWinner = run?.phase === 'hold' && !canAdvance();
+    $('next').disabled = !canAdvance();
+    $('all').disabled = !active() || waitingForWinner;
+    showMessage('winner-hold-note', waitingForWinner && run.advance === 'manual' ? holdMessage : '');
     say('next', run?.index + 1 === run?.receipt.count ? 'Finish draw' : 'Next winner');
     say('pause', run?.pausedAt ? 'Resume' : 'Pause');
     if (!run) {
@@ -658,9 +672,17 @@ function startOperator() {
     renderControls();
     if (!run.pausedAt && run.phase === 'spin') {
       advanceTimer = setTimeout(land, Math.max(0, run.start + run.spin - Date.now()));
-    } else if (!run.pausedAt && run.phase === 'hold' && run.advance === 'auto') {
-      advanceTimer = setTimeout(next, Math.max(0, run.start + run.hold - Date.now()));
+    } else if (run.phase === 'hold') {
+      scheduleWinnerAdvance();
     }
+  }
+
+  function scheduleWinnerAdvance() {
+    if (run?.phase !== 'hold' || run.pausedAt) return;
+    const remaining = winnerTimeRemaining();
+    if (remaining > 0) advanceTimer = setTimeout(scheduleWinnerAdvance, remaining);
+    else if (run.advance === 'auto') next();
+    else renderControls();
   }
 
   function land() {
@@ -670,7 +692,7 @@ function startOperator() {
   }
 
   function next() {
-    if (!run || run.phase !== 'hold') return;
+    if (!canAdvance()) return;
     if (run.revealed === run.receipt.count) {
       Object.assign(run, { phase: 'complete', pausedAt: null });
     } else {
@@ -1064,7 +1086,7 @@ function startOperator() {
   $('skip').addEventListener('click', land);
   $('next').addEventListener('click', next);
   $('all').addEventListener('click', () => {
-    if (!active()) return;
+    if (!active() || (run.phase === 'hold' && !canAdvance())) return;
     Object.assign(run, { phase: 'summary', index: run.receipt.count - 1, revealed: run.receipt.count, pausedAt: null });
     updateReveal();
   });
