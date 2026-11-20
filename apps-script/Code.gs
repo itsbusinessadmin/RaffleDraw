@@ -13,13 +13,13 @@ const TOKEN = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function settings_() {
-  const p = PropertiesService.getScriptProperties();
-  const admin = p.getProperty('RAFFLE_ADMIN_TOKEN');
-  const random = p.getProperty('RAFFLE_RANDOM_KEY');
+  const p = PropertiesService.getScriptProperties().getProperties();
+  const admin = p.RAFFLE_ADMIN_TOKEN;
+  const random = p.RAFFLE_RANDOM_KEY;
   if (!TOKEN.test(admin || '') || !TOKEN.test(random || '') || admin === random) {
     fail_('SETUP', 'Configure two distinct 64-character hexadecimal keys in Apps Script.');
   }
-  return { id: p.getProperty('RAFFLE_SPREADSHEET_ID') || PRODUCTION_SHEET, admin, random };
+  return { id: p.RAFFLE_SPREADSHEET_ID || PRODUCTION_SHEET, admin, random };
 }
 
 // Run both editor functions as the account that will deploy the web app.
@@ -47,7 +47,9 @@ function doPost(e) {
     if (!input || typeof input !== 'object') fail_('BAD_REQUEST', 'Invalid request.');
     const cfg = settings_();
     if (!equalToken_(input.token, cfg.admin)) fail_('UNAUTHORIZED', 'The administrator key is incorrect.');
-    const result = locked_(() => dispatch_(cfg, input));
+    const result = input.action === 'presentation'
+      ? { snapshot: presentation_(cfg), now: Date.now() }
+      : locked_(() => input.action === 'publishPresentation' ? publishPresentation_(cfg, input) : dispatch_(cfg, input));
     return json_({ ok: true, result });
   } catch (error) {
     if (!error.code) console.error(error.stack || String(error));
@@ -77,6 +79,52 @@ function locked_(action) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(25000)) fail_('BUSY', 'The spreadsheet is busy. Retry this request.');
   try { return action(); } finally { lock.releaseLock(); }
+}
+
+function presentationKey_(cfg) {
+  return 'RAFFLE_PRESENTATION:' + cfg.id;
+}
+
+function presentation_(cfg) {
+  return JSON.parse(PropertiesService.getScriptProperties().getProperty(presentationKey_(cfg)) || 'null');
+}
+
+function publishPresentation_(cfg, input) {
+  const { kind, origin, eventName, prizeId, prizeName, advance, run } = input;
+  if (!['selection', 'begin', 'continue'].includes(kind) || typeof origin !== 'string' || !UUID.test(origin) ||
+      typeof eventName !== 'string' || eventName.length > 120 || typeof prizeName !== 'string' || prizeName.length > 100 ||
+      (prizeId !== '' && (typeof prizeId !== 'string' || !UUID.test(prizeId))) ||
+      !['auto', 'manual'].includes(advance)) fail_('VALIDATION', 'Invalid projector update.');
+  let reveal = null;
+  if (kind !== 'selection') {
+    const tx = tx_(run?.tx);
+    const { phase, index, revealed, elapsed, spin, speed, paused } = run;
+    if (!['spin', 'hold', 'complete', 'summary'].includes(phase) ||
+        !Number.isSafeInteger(index) || index < 0 || index >= 1000 ||
+        !Number.isSafeInteger(revealed) || revealed < 0 || revealed > 1000 ||
+        !Number.isSafeInteger(elapsed) || elapsed < 0 || elapsed > 60000 ||
+        !Number.isSafeInteger(spin) || spin < 0 || spin > 6000 ||
+        !['standard', 'fast'].includes(speed) || typeof paused !== 'boolean') fail_('VALIDATION', 'Invalid projector reveal.');
+    if (kind === 'begin') {
+      const history = rows_(cfg.id, ['DRAW_HISTORY']).DRAW_HISTORY;
+      const newest = history.slice(1).filter(draw => draw[5] > 0).at(-1);
+      if (newest?.[0] !== tx || newest[1] !== prizeId) return { published: false };
+    } else {
+      const current = presentation_(cfg);
+      if (current?.origin !== origin || current.run?.tx !== tx || current.prizeId !== prizeId) return { published: false };
+    }
+    reveal = { tx, phase, index, revealed, elapsed, spin, speed, paused };
+  }
+  const snapshot = { origin, eventName, prizeId, prizeName, advance, run: reveal,
+    updatedAt: Date.now(), revision: Utilities.getUuid() };
+  PropertiesService.getScriptProperties().setProperty(presentationKey_(cfg), JSON.stringify(snapshot));
+  return { published: true };
+}
+
+function clearPrizePresentation_(cfg, prizeId) {
+  if (presentation_(cfg)?.prizeId === prizeId) {
+    PropertiesService.getScriptProperties().deleteProperty(presentationKey_(cfg));
+  }
 }
 
 function meta_(id) {
@@ -289,9 +337,21 @@ function dispatch_(cfg, input) {
     case 'state': return state_(db);
     case 'settings': return saveSettings_(db, input);
     case 'prize': return savePrize_(db, input);
-    case 'archivePrize': return archivePrize_(db, input);
-    case 'deletePrize': return deletePrize_(db, input);
-    case 'resetPrize': return resetPrize_(db, input);
+    case 'archivePrize': {
+      const result = archivePrize_(db, input);
+      if (result.archived) clearPrizePresentation_(cfg, input.prizeId);
+      return result;
+    }
+    case 'deletePrize': {
+      const result = deletePrize_(db, input);
+      clearPrizePresentation_(cfg, input.prizeId);
+      return result;
+    }
+    case 'resetPrize': {
+      const result = resetPrize_(db, input);
+      if (result.restored) clearPrizePresentation_(cfg, input.prizeId);
+      return result;
+    }
     case 'draw': return draw_(db, cfg.random, input);
     case 'receipt': {
       const tx = tx_(input.tx);
@@ -307,6 +367,7 @@ function state_(db) {
   const byTx = new Map(db.history.map(draw => [draw.tx, draw]));
   return {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
+    presentationSync: true,
     total: db.eligible.length + db.invalid + db.winnerList.length, eligible: db.eligible.length, won: db.winnerList.length,
     invalid: db.invalid, excluded: db.excluded, prizes: db.prizes, lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {

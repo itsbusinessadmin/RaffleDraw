@@ -1153,6 +1153,10 @@ dialog .error {
   margin-bottom: 7px;
   font-size: 1.05rem;
 }
+.projector-controls .hint {
+  margin: 0 0 5px;
+  color: var(--stage-muted);
+}
 .projector-controls label {
   color: var(--stage-muted);
   margin: 0;

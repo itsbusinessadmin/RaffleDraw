@@ -292,6 +292,48 @@ test('deleting a prize atomically restores its winners and rejects stale confirm
   assert.equal(ok(app.request('state')).prizes.length, 0);
 });
 
+test('projector sync shares selections and committed draw progress across operators', () => {
+  const app = fixture();
+  app.initialize();
+  app.loadRoster([['Name', 'Participant ID'], ['First', '001'], ['Second', '002']]);
+  const prizeId = ok(app.request('prize', { name: 'Phone Prize', limit: 2, perDraw: 1 })).id;
+  const screen = { origin: randomUUID(), eventName: 'Raffle Draw', prizeId, prizeName: 'Phone Prize', advance: 'manual' };
+  assert.equal(ok(app.request('state')).presentationSync, true);
+  assert.equal(ok(app.request('presentation')).snapshot, null);
+  assert.equal(app.request('presentation', {}, 'wrong').code, 'UNAUTHORIZED');
+  assert.equal(app.request('publishPresentation', { ...screen, kind: 'selection' }, 'wrong').code, 'UNAUTHORIZED');
+  const sheetsWrites = app.writes();
+  assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'selection' })).published, true);
+  const { snapshot } = ok(app.request('presentation'));
+  assert.equal(snapshot.prizeName, 'Phone Prize');
+  assert.equal(snapshot.run, null);
+  assert.equal(app.writes(), sheetsWrites);
+
+  const tx = randomUUID();
+  const run = { tx, phase: 'spin', index: 0, revealed: 0, elapsed: 0, speed: 'fast', spin: 1650, paused: false };
+  assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, false);
+  const receipt = ok(app.request('draw', { tx, prizeId }));
+  assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, true);
+  const hold = { ...run, phase: 'hold', revealed: 1 };
+  assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'continue', run: hold })).published, true);
+  const current = ok(app.request('presentation')).snapshot;
+  assert.equal(current.run.phase, 'hold');
+  assert.equal(current.run.tx, tx);
+  assert.equal(current.run.winners, undefined);
+  assert.deepEqual(ok(app.request('receipt', { tx })).winners, receipt.winners);
+
+  const other = { ...screen, origin: randomUUID(), kind: 'selection' };
+  ok(app.request('publishPresentation', other));
+  assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'continue', run: hold })).published, false);
+  assert.equal(ok(app.request('presentation')).snapshot.origin, other.origin);
+  const second = randomUUID();
+  ok(app.request('draw', { tx: second, prizeId }));
+  assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, false);
+  ok(app.request('publishPresentation', { ...other, kind: 'begin', run: { ...run, tx: second } }));
+  ok(app.request('resetPrize', { prizeId, throughTx: second }));
+  assert.equal(ok(app.request('presentation')).snapshot, null);
+});
+
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {
   const steps = 52;
   const sequence = Array.from({ length: 11 }, (_, i) => positionAt(i / 10, steps));

@@ -64,11 +64,12 @@ if (isProjector) {
 
   function render() {
     cancelAnimationFrame(frame);
-    const { eventName, prizeName, run, advance, advanceEditable, drawTx } = live;
+    const { eventName, prizeName, run, advance, advanceEditable, drawTx, remote } = live;
+    $('projector-remote').hidden = !remote;
     drawButton.disabled = !drawTx;
     advanceSelect.disabled = !advanceEditable;
     advanceSelect.value = advance || 'auto';
-    const manual = run?.advance === 'manual' && (run.phase === 'spin' || run.phase === 'hold');
+    const manual = !remote && run?.advance === 'manual' && (run.phase === 'spin' || run.phase === 'hold');
     nextButton.hidden = !manual;
     nextButton.disabled = !manual || run.phase !== 'hold';
     if (manual) say('projector-next', run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner');
@@ -95,6 +96,11 @@ if (isProjector) {
     render();
   });
   channel.postMessage({ type: 'ready' });
+  function pollPresentation() {
+    if (!document.hidden) channel.postMessage({ type: 'poll-presentation' });
+  }
+  document.addEventListener('visibilitychange', pollPresentation);
+  setInterval(pollPresentation, 1500);
   $('fullscreen').addEventListener('click', async () => {
     try { await projector.requestFullscreen(); }
     catch (_) { say('fullscreen', 'Fullscreen unavailable'); }
@@ -135,6 +141,7 @@ function startOperator() {
   const rememberedKey = scope + 'remembered-connection';
   const projectorKey = scope + 'projector';
   const projectorId = sessionStorage.getItem(projectorKey) || crypto.randomUUID();
+  const presentationOrigin = crypto.randomUUID();
   sessionStorage.setItem(projectorKey, projectorId);
   const channel = new BroadcastChannel('raffle-projector-' + projectorId);
   const navLinks = [...document.querySelectorAll('.section-nav a')];
@@ -159,6 +166,12 @@ function startOperator() {
   let offeredDraw = null;
   let frame = 0;
   let advanceTimer = 0;
+  let remotePresentation = null;
+  let presentationRevision = null;
+  let presentationGeneration = 0;
+  let queuedPresentation = null;
+  let writingPresentation = false;
+  let readingPresentation = false;
 
   function connectionStatus(label, status) {
     const indicator = $('sync');
@@ -224,6 +237,10 @@ function startOperator() {
   }
 
   function publish() {
+    if (remotePresentation) {
+      channel.postMessage({ type: 'state', ...remotePresentation, remote: true });
+      return;
+    }
     channel.postMessage({
       type: 'state', eventName: state?.eventName || 'Raffle Draw',
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
@@ -232,9 +249,98 @@ function startOperator() {
     });
   }
 
+  function queuePresentation(kind) {
+    if (!state?.presentationSync || !token) return;
+    remotePresentation = null;
+    presentationGeneration++;
+    // Keep an unsent start when a later frame supersedes it in the queue.
+    const starting = queuedPresentation?.kind === 'begin' && queuedPresentation.run?.tx === run?.receipt.tx;
+    queuedPresentation = {
+      kind: kind === 'continue' && starting ? 'begin' : kind,
+      origin: presentationOrigin,
+      eventName: run?.receipt.eventName || state.eventName,
+      prizeId: run?.receipt.prizeId || selected,
+      prizeName: run?.receipt.prizeName || state.prizes.find(prize => prize.id === selected)?.name || '',
+      advance: run?.advance || $('advance').value,
+      run: run && {
+        tx: run.receipt.tx, phase: run.phase, index: run.index, revealed: run.revealed, speed: run.speed, spin: run.spin,
+        paused: Boolean(run.pausedAt), elapsed: Math.min(60000, Math.max(0, (run.pausedAt ?? Date.now()) - run.start))
+      }
+    };
+    flushPresentation();
+  }
+
+  async function flushPresentation() {
+    if (writingPresentation) return;
+    writingPresentation = true;
+    try {
+      while (queuedPresentation && token) {
+        const update = queuedPresentation;
+        const url = endpoint;
+        const key = token;
+        queuedPresentation = null;
+        try {
+          await api('publishPresentation', update, url, key);
+        } catch (error) {
+          if (endpoint !== url || token !== key) continue;
+          // If a start or selection failed in transit, send the latest state once more.
+          const retry = queuedPresentation || update;
+          if (retry.kind === 'continue' && update.kind === 'begin' && retry.run?.tx === update.run.tx) retry.kind = 'begin';
+          queuedPresentation = null;
+          try { await api('publishPresentation', retry, url, key); }
+          catch (_) {
+            if (endpoint === url && token === key) showMessage('issue', 'Projector sync interrupted. ' + error.message);
+          }
+        }
+      }
+    } finally {
+      writingPresentation = false;
+    }
+  }
+
+  async function followPresentation() {
+    if (!state?.presentationSync || !token || readingPresentation || writingPresentation || active()) return;
+    readingPresentation = true;
+    const url = endpoint;
+    const key = token;
+    const generation = presentationGeneration;
+    try {
+      const { snapshot, now } = await api('presentation', {}, url, key);
+      if (snapshot?.revision === presentationRevision || (!snapshot && !remotePresentation)) return;
+      let remoteRun = null;
+      if (snapshot?.run && snapshot.origin !== presentationOrigin) {
+        const details = snapshot.run;
+        const cached = remotePresentation?.run?.receipt;
+        const receipt = cached?.tx === details.tx ? cached : await api('receipt', { tx: details.tx }, url, key).catch(error => {
+          if (error.code !== 'NOT_FOUND') throw error;
+          return null;
+        });
+        if (receipt && details.index < receipt.count && details.revealed <= receipt.count) {
+          const localTime = Date.now();
+          const age = details.paused ? 0 : Math.max(0, now - snapshot.updatedAt);
+          remoteRun = {
+            ...details, receipt, advance: snapshot.advance,
+            start: localTime - details.elapsed - age, pausedAt: details.paused ? localTime : null
+          };
+        }
+      }
+      if (endpoint !== url || token !== key || generation !== presentationGeneration || writingPresentation || active()) return;
+      presentationRevision = snapshot?.revision || null;
+      remotePresentation = snapshot && snapshot.origin !== presentationOrigin ? {
+        eventName: snapshot.eventName, prizeName: snapshot.prizeName, advance: snapshot.advance, run: remoteRun
+      } : null;
+      publish();
+    } catch (_) {
+      // Keep the last rendered state while the next projector poll retries.
+    } finally {
+      readingPresentation = false;
+    }
+  }
+
   channel.addEventListener('message', event => {
     const message = event.data;
     if (message?.type === 'ready') publish();
+    if (message?.type === 'ready' || message?.type === 'poll-presentation') followPresentation();
     if (message?.type === 'draw') {
       if (offeredDraw && message.tx === offeredDraw.tx) startDraw();
       else publish();
@@ -273,6 +379,10 @@ function startOperator() {
     refreshSequence++;
     state = null;
     run = null;
+    remotePresentation = null;
+    presentationRevision = null;
+    presentationGeneration++;
+    queuedPresentation = null;
     selectingPrizes = false;
     selectingArchived = false;
     selectedPrizes.clear();
@@ -526,7 +636,7 @@ function startOperator() {
     if (run.phase === 'spin' && !run.pausedAt && Date.now() - run.start < run.spin) frame = requestAnimationFrame(drawFrame);
   }
 
-  function updateReveal() {
+  function updateReveal(kind = 'continue') {
     clearTimeout(advanceTimer);
     drawFrame();
     const message = run.phase === 'hold' ? run.receipt.winners[run.index] :
@@ -534,6 +644,7 @@ function startOperator() {
     say('stage-status', run.receipt.prizeName);
     say('stage-caption', active() ? 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count + ' · ' + message : message);
     renderResults('operator-results', run);
+    queuePresentation(kind);
     renderControls();
     if (!run.pausedAt && run.phase === 'spin') {
       advanceTimer = setTimeout(land, Math.max(0, run.start + run.spin - Date.now()));
@@ -564,7 +675,7 @@ function startOperator() {
       receipt, speed, advance: options.advance || $('advance').value, index: 0,
       phase: 'spin', start: Date.now(), spin: duration(speed, reduceMotion.matches), pausedAt: null, revealed: 0
     };
-    updateReveal();
+    updateReveal('begin');
   }
 
   function startDraw() {
@@ -888,6 +999,7 @@ function startOperator() {
       run = null;
       renderResults('operator-results', null);
     }
+    queuePresentation('selection');
     renderControls();
   });
   $('draw').addEventListener('click', startDraw);

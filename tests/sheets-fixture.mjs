@@ -16,6 +16,9 @@ export function fixture(defaultRows = []) {
   let failure = '';
   let lastRequests = [];
   let batches = 0;
+  const properties = new Map([
+    ['RAFFLE_SPREADSHEET_ID', testId], ['RAFFLE_ADMIN_TOKEN', key], ['RAFFLE_RANDOM_KEY', 'b'.repeat(64)]
+  ]);
   const sheetByName = (store, title) => [...store.values()].find(sheet => sheet.properties.title === title);
   const set = (rows, row, col, values) => {
     rows[row] ||= [];
@@ -103,9 +106,12 @@ export function fixture(defaultRows = []) {
       tryLock: () => { if (inLock) return false; inLock = true; return true; },
       releaseLock: () => { inLock = false; }
     }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: name => ({
-      RAFFLE_SPREADSHEET_ID: testId, RAFFLE_ADMIN_TOKEN: key, RAFFLE_RANDOM_KEY: 'b'.repeat(64)
-    })[name] }) },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperties: () => Object.fromEntries(properties),
+      getProperty: name => properties.get(name) ?? null,
+      setProperty: (name, value) => properties.set(name, value),
+      deleteProperty: name => properties.delete(name)
+    }) },
     Utilities: {
       getUuid: randomUUID,
       computeHmacSha256Signature: (value, secret) => [...createHmac('sha256', secret).update(value).digest()]
