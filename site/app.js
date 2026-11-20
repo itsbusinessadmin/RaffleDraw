@@ -73,7 +73,8 @@ if (isProjector) {
 
   function render() {
     cancelAnimationFrame(frame);
-    const { eventName, prizeName, run, advance, advanceEditable, drawTx, remote, nextReady } = live;
+    const { eventName, prizeName, run: currentRun, advance, advanceEditable, drawTx, remote, nextReady } = live;
+    const run = currentRun?.phase === 'complete' && currentRun.advance === 'manual' ? null : currentRun;
     $('projector-remote').hidden = !remote;
     advanceSelect.disabled = !advanceEditable;
     advanceSelect.value = advance || 'auto';
@@ -101,7 +102,7 @@ if (isProjector) {
       redrawDialog.close();
     }
     say('projector-event', run?.receipt.eventName || eventName);
-    say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
+    say('projector-prize', run?.receipt.prizeName || prizeName || currentRun?.receipt.prizeName || 'Live draw');
     const caption = $('projector-caption');
     caption.toggleAttribute('data-announcement-only', run?.phase === 'hold');
     caption.toggleAttribute('data-drawing', run?.phase === 'spin' && !run.pausedAt);
@@ -114,8 +115,7 @@ if (isProjector) {
       showMessage('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
       say('projector-caption', done ? run.revealed + ' winners revealed' :
         run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
-      if (run.phase === 'complete' && run.advance === 'manual') reel.idle('');
-      else drawFrame();
+      drawFrame();
     }
     renderResults('projector-results', run);
   }
