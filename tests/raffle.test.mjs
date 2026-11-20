@@ -398,6 +398,34 @@ test('wheel settings persist independently from ticket reel settings', () => {
   assert.deepEqual([reel.drawTheme, reel.wheelSeconds, reel.wheelNamesPerSecond], ['reel', 7.5, 18]);
 });
 
+test('wheel receipts keep every entry and the exact selected slices after recovery and re-drawing', () => {
+  const app = fixture();
+  app.initialize();
+  const names = Array.from({ length: 1050 }, (_, index) => index < 2
+    ? 'Same name' : 'Participant ' + (index + 1) + ' with a longer name 🎭');
+  app.loadRoster([['Name', 'Participant ID'], ...names.map((name, index) => [name, String(index + 1)])]);
+  const prizeId = ok(app.request('prize', { name: 'Wheel Prize', limit: 4, perDraw: 4 })).id;
+  const input = { tx: randomUUID(), prizeId, drawTheme: 'wheel' };
+  app.fail('after');
+  assert.equal(app.request('draw', input).code, 'BACKEND_ERROR');
+  const receipt = ok(app.request('draw', input));
+  assert.deepEqual(receipt.wheel.names, names);
+  const originalIndexes = app.data('DRAW_WINNERS').slice(1).map(row => Number(row[2]) - 1);
+  assert.deepEqual(receipt.wheel.winnerIndexes, originalIndexes);
+  assert.deepEqual(ok(app.request('receipt', { tx: input.tx })).wheel, receipt.wheel);
+  const eligibleBeforeRedo = app.data('ALL IMS').slice(1).map(row => row[0])
+    .filter(name => name.toLowerCase() !== receipt.winners[1].toLowerCase());
+  const redraw = { tx: randomUUID(), drawTx: input.tx, prizeId, position: 2, drawTheme: 'wheel' };
+  app.fail('after');
+  assert.equal(app.request('redraw', redraw).code, 'BACKEND_ERROR');
+  const replacement = ok(app.request('redraw', redraw));
+  assert.deepEqual(replacement.wheel, receipt.wheel);
+  assert.deepEqual(replacement.wheelRedraw.names, eligibleBeforeRedo);
+  assert.equal(replacement.wheelRedraw.position, 2);
+  assert.equal(replacement.wheelRedraw.names[replacement.wheelRedraw.winnerIndex], replacement.winners[1]);
+  assert.deepEqual(ok(app.request('receipt', { tx: input.tx })).wheelRedraw, replacement.wheelRedraw);
+});
+
 test('projector sync shares selections and committed draw progress across operators', () => {
   const app = fixture();
   app.initialize();

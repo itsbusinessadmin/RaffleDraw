@@ -868,10 +868,10 @@ function startOperator() {
     redrawError = '';
     renderControls();
     try {
-      const { tx, prizeId, drawTx, position, throughRedrawTx } = request;
+      const { tx, prizeId, drawTx, position, throughRedrawTx, drawTheme } = request;
       const receipt = drawTx
-        ? await api('redraw', { tx, prizeId, drawTx, position, throughRedrawTx })
-        : await api('draw', { tx, prizeId });
+        ? await api('redraw', { tx, prizeId, drawTx, position, throughRedrawTx, drawTheme })
+        : await api('draw', { tx, prizeId, drawTheme });
       clearPending(request.tx);
       redrawPrompt = false;
       if (token) begin(receipt, request);

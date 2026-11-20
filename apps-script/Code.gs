@@ -5,6 +5,8 @@ const GUARD = 'RAFFLE_WRITE_VERSION';
 const ARCHIVED_PRIZE = 'archivedPrize:';
 const ALL_PARTICIPANTS = 'allParticipants:';
 const REDRAW = 'redraw:';
+const WHEEL_DRAW_POOL = 'wheelDrawPool';
+const WHEEL_REDRAW_POOL = 'wheelRedrawPool';
 const DEFAULT_REVEAL_SECONDS = 4.8;
 const DEFAULT_NAMES_PER_SECOND = 11;
 const DEFAULT_WINNER_SECONDS = 1.8;
@@ -656,11 +658,41 @@ function deletePrize_(db, input) {
 
 function receipt_(db, draw, reelNames) {
   const prize = db.prizes.find(item => item.id === draw.prizeId);
+  const redrawTx = redrawVersion_(db, draw.tx);
   return {
-    ...draw, redrawTx: redrawVersion_(db, draw.tx),
+    ...draw, redrawTx,
     winners: db.winnersByDraw.get(draw.tx).slice().sort((a, b) => a.position - b.position).map(winner => winner.name),
-    names: reelNames || participantsForPrize_(db, prize).map(person => person.name)
+    names: reelNames || participantsForPrize_(db, prize).map(person => person.name),
+    wheel: readWheelPool_(db, WHEEL_DRAW_POOL, draw.tx),
+    wheelRedraw: readWheelPool_(db, WHEEL_REDRAW_POOL, redrawTx)
   };
+}
+
+function readWheelPool_(db, key, tx) {
+  const count = db.settings.get(key + ':chunks');
+  if (!tx || db.settings.get(key + ':tx') !== tx || !Number.isSafeInteger(count) || count < 1 || count > db.settings.size) return;
+  const chunks = Array.from({ length: count }, (_, index) => db.settings.get(key + ':' + index));
+  if (chunks.some(chunk => typeof chunk !== 'string')) return;
+  try {
+    return JSON.parse(chunks.join(''));
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function wheelPoolSettings_(db, key, tx, pool) {
+  const content = JSON.stringify(pool);
+  const chunks = [];
+  for (let offset = 0; offset < content.length;) {
+    // Each Sheets cell has a 50,000-character limit. Keep UTF-16 pairs together.
+    let end = Math.min(content.length, offset + 30000);
+    if (content.charCodeAt(end - 1) >= 0xd800 && content.charCodeAt(end - 1) <= 0xdbff) end--;
+    chunks.push(content.slice(offset, end));
+    offset = end;
+  }
+  const slots = Math.max(chunks.length, db.settings.get(key + ':chunks') || 0);
+  const values = Array.from({ length: slots }, (_, index) => [key + ':' + index, chunks[index] ?? '']);
+  return [[key + ':tx', tx], [key + ':chunks', chunks.length], ...values];
 }
 
 function redrawVersion_(db, drawTx) {
@@ -828,10 +860,14 @@ function redraw_(db, key, input) {
     else copyRecord_(requests, span(source.sheetId, source.row), destination);
   }
   requests.push(write_(db.tabs.DRAW_WINNERS.sheetId, db.winnerList.indexOf(old) + 1, 2, [[id, replacement.name]]));
-  writeSettings_(db, requests, [[setting, operation]]);
+  const wheelRedraw = input.drawTheme === 'wheel' ? {
+    names: participants.map(person => person.name), position, winnerIndex: participants.indexOf(replacement)
+  } : undefined;
+  writeSettings_(db, requests, [[setting, operation],
+    ...(wheelRedraw ? wheelPoolSettings_(db, WHEEL_REDRAW_POOL, tx, wheelRedraw) : [])]);
   commit_(db, requests);
   old.name = replacement.name;
-  return { ...receipt_(db, draw, participants.map(person => person.name)), redrawTx: tx };
+  return { ...receipt_(db, draw, participants.map(person => person.name)), redrawTx: tx, wheelRedraw };
 }
 
 function draw_(db, key, input) {
@@ -850,6 +886,11 @@ function draw_(db, key, input) {
   if (!count) fail_('VALIDATION', 'There are no eligible participants or winning slots for this prize.');
   const names = participants.map(person => person.name);
   const selected = select_(participants, count, randomStream_(key, db.id + '/' + tx + '/' + prize.id));
+  let wheel;
+  if (input.drawTheme === 'wheel') {
+    const indexes = new Map(participants.map((person, index) => [person, index]));
+    wheel = { names, winnerIndexes: selected.map(person => indexes.get(person)) };
+  }
   const width = db.data[ROSTER].reduce((max, row) => Math.max(max, row.length), db.headers.length);
   const ids = db.idColumn < 0 ? width : db.idColumn;
   const headers = Array.from({ length: Math.max(width, ids + 1) }, (_, i) => i === ids && db.idColumn < 0 ? ID_HEADER : db.rawHeaders[i] ?? '');
@@ -906,6 +947,7 @@ function draw_(db, key, input) {
   requests.push(write_(history.sheetId, db.data.DRAW_HISTORY.length, 0, [[tx, prize.id, prize.name, db.eventName, at, count]]),
     write_(winners.sheetId, db.data.DRAW_WINNERS.length, 0, selected.map((person, i) => [tx, prize.id, person.id, person.name, i + 1])));
   deleteRows_(requests, roster, selected.flatMap(person => person.row === undefined ? [] : [person.row]));
+  if (wheel) writeSettings_(db, requests, wheelPoolSettings_(db, WHEEL_DRAW_POOL, tx, wheel));
   commit_(db, requests);
-  return { tx, prizeId: prize.id, prizeName: prize.name, eventName: db.eventName, at, count, winners: selected.map(person => person.name), names };
+  return { tx, prizeId: prize.id, prizeName: prize.name, eventName: db.eventName, at, count, winners: selected.map(person => person.name), names, wheel };
 }

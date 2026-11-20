@@ -577,39 +577,12 @@ footer {
 .draw-wheel-disc {
   position: absolute;
   inset: 0;
-  overflow: hidden;
+  width: 100%;
+  height: 100%;
   border: 3px solid #e0ba72;
   border-radius: 50%;
-  background:
-    radial-gradient(circle, transparent 58%, #0e070c55),
-    repeating-conic-gradient(from -15deg,
-      #c89e5f 0deg 0.6deg, #3b2233 0.6deg 30deg,
-      #c89e5f 30deg 30.6deg, #22202c 30.6deg 60deg,
-      #c89e5f 60deg 60.6deg, #592c42 60.6deg 90deg);
+  background: radial-gradient(circle at 45% 35%, #4c2b3c, #1c1520 75%);
   box-shadow: inset 0 0 0 4px #21121a, 0 10px 28px #12080970;
-}
-.draw-wheel-sector {
-  position: absolute;
-  inset: 0;
-}
-.draw-wheel-label {
-  position: absolute;
-  top: 24%;
-  left: 50%;
-  width: 35%;
-  transform: translate(-50%, -50%) rotate(-90deg);
-  overflow: hidden;
-  color: #fff1d4;
-  font-size: clamp(0.55rem, 1.1vw, 0.9rem);
-  font-weight: 650;
-  line-height: 1.3;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.draw-wheel-label[data-picked] {
-  color: var(--ticket-gold);
-  font-weight: 800;
 }
 .draw-wheel-hub,
 .draw-wheel-pointer {
@@ -619,12 +592,27 @@ footer {
 }
 .draw-wheel-hub {
   top: 50%;
-  width: 11%;
+  width: 24%;
   aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   transform: translate(-50%, -50%);
   border: 3px solid #462938;
   border-radius: 50%;
+  color: #291821;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
   box-shadow: 0 3px 12px #0e070c99;
+}
+.draw-wheel-count {
+  font-size: clamp(0.75rem, 1.4vw, 1.4rem);
+  font-weight: 800;
+}
+.draw-wheel-count-label {
+  font-size: clamp(0.55rem, 1vw, 0.75rem);
+  font-weight: 650;
 }
 .draw-wheel-pointer {
   top: -8px;
@@ -1119,12 +1107,21 @@ dialog .error {
   height: calc(2.8 * var(--row));
 }
 .projector-main .draw-wheel {
-  --wheel-size: clamp(210px, min(46vh, 62vw), 450px);
+  --wheel-size: clamp(210px, min(40vh, 62vw), 450px);
   grid-row: 2;
 }
 .projector-main .draw-wheel-winner {
   font-family: "Cormorant Garamond", Georgia, serif;
   font-size: clamp(1.5rem, 3.2vw, 3.1rem);
+}
+.draw-wheel-winner[data-preview] {
+  width: min(100%, 32ch);
+  overflow: hidden;
+  border-color: #c89e5f59;
+  color: #efddbd;
+  font: 600 clamp(0.875rem, 1.3vw, 1.1875rem) / 1.4 Inter, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #projector .reel::before {
   --ticket-fill:
