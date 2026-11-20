@@ -124,6 +124,11 @@ export function fixture(defaultRows = []) {
     } }
   });
   vm.runInContext(code, context);
+  function loadRows(name, rows) {
+    const sheet = sheetByName(sheets, name);
+    sheet.rows = structuredClone(rows);
+    sheet.properties.gridProperties.rowCount = Math.max(sheet.properties.gridProperties.rowCount, rows.length);
+  }
   return {
     initialize: () => context.initializeRaffle(),
     verify: () => context.verifySpreadsheetAccess(),
@@ -131,11 +136,8 @@ export function fixture(defaultRows = []) {
     data: name => structuredClone(compact(sheetByName(sheets, name).rows)),
     names: () => [...sheets.values()].map(({ properties }) => properties.title),
     hidden: () => [...sheets.values()].filter(({ properties }) => properties.hidden).map(({ properties }) => properties.title),
-    loadRoster(rows) {
-      const sheet = sheetByName(sheets, 'ALL IMS');
-      sheet.rows = structuredClone(rows);
-      sheet.properties.gridProperties.rowCount = Math.max(1000, rows.length);
-    },
+    loadRoster: rows => loadRows('ALL IMS', rows),
+    loadRows,
     fail: when => { failure = when; },
     writes: () => batches,
     rejectStale: () => {

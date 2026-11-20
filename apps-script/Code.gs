@@ -396,12 +396,25 @@ function resetPrize_(db, input) {
     winnerRows.push(index + 1);
     winnerIds.add(winner.id);
   });
-  const recordsToRestore = records.slice(1);
-  if (recordsToRestore.length !== winnerRows.length || !recordsToRestore.every(row =>
-    winnerIds.delete(String(row[db.idColumn] ?? '').trim()))) {
-    fail_('INTEGRITY', 'The prize worksheet participant IDs differ from the winner ledger.');
+  const recordIndexes = [];
+  const unmatchedRows = [];
+  let rosterDuplicate = false;
+  for (let index = 1; index < records.length; index++) {
+    const row = records[index] || [];
+    if (!row.some(value => value !== undefined && value !== null && value !== '')) continue;
+    recordIndexes.push(index);
+    const participantId = String(row[db.idColumn] ?? '').trim();
+    if (!winnerIds.delete(participantId)) unmatchedRows.push(index + 1);
+    if (db.activeIds.has(participantId)) rosterDuplicate = true;
   }
-  if (recordsToRestore.some(row => db.activeIds.has(String(row[db.idColumn] ?? '').trim()))) {
+  if (unmatchedRows.length || winnerIds.size) {
+    const counts = 'The prize worksheet has ' + recordIndexes.length + (recordIndexes.length === 1 ? ' row' : ' rows') +
+      ' with data. DRAW_WINNERS lists ' + winnerRows.length + (winnerRows.length === 1 ? ' winner' : ' winners') + ' for this prize.';
+    const affected = unmatchedRows.length ? ' Check for missing, duplicate, or unexpected Participant IDs on prize worksheet rows ' +
+      unmatchedRows.slice(0, 8).join(', ') + (unmatchedRows.length > 8 ? ', and others.' : '.') : '';
+    fail_('INTEGRITY', counts + affected + ' Compare those records with DRAW_WINNERS before retrying.');
+  }
+  if (rosterDuplicate) {
     fail_('INTEGRITY', 'ALL IMS already contains a winner from this prize. Resolve the duplicate record before resetting.');
   }
   const outputMeta = db.bookSheets.find(sheet => sheet.properties.sheetId === output.sheetId);
@@ -411,25 +424,29 @@ function resetPrize_(db, input) {
 
   const requests = [];
   const rosterEnd = db.data[ROSTER].length;
-  resize_(requests, roster, rosterEnd + recordsToRestore.length, width);
-  const source = { sheetId: output.sheetId, startRowIndex: 1, endRowIndex: records.length,
-    startColumnIndex: 0, endColumnIndex: width };
-  const destination = { ...source, sheetId: roster.sheetId, startRowIndex: rosterEnd,
-    endRowIndex: rosterEnd + recordsToRestore.length };
-  for (const pasteType of ['PASTE_NORMAL', 'PASTE_VALUES']) {
-    requests.push({ copyPaste: { source, destination, pasteType, pasteOrientation: 'NORMAL' } });
+  resize_(requests, roster, rosterEnd + recordIndexes.length, width);
+  for (let i = 0; i < recordIndexes.length;) {
+    const startRowIndex = recordIndexes[i];
+    const startDestination = rosterEnd + i;
+    let endRowIndex = startRowIndex + 1;
+    while (recordIndexes[++i] === endRowIndex) endRowIndex++;
+    const source = { sheetId: output.sheetId, startRowIndex, endRowIndex, startColumnIndex: 0, endColumnIndex: width };
+    const destination = { ...source, sheetId: roster.sheetId, startRowIndex: startDestination, endRowIndex: rosterEnd + i };
+    for (const pasteType of ['PASTE_NORMAL', 'PASTE_VALUES']) {
+      requests.push({ copyPaste: { source, destination, pasteType, pasteOrientation: 'NORMAL' } });
+    }
   }
   const ledger = db.tabs.DRAW_WINNERS;
   for (const sheet of [output, ledger]) {
-    resize_(requests, sheet, recordsToRestore.length + (sheet.gridProperties.frozenRowCount || 0) + 1, 0);
+    resize_(requests, sheet, recordIndexes.length + (sheet.gridProperties.frozenRowCount || 0) + 1, 0);
   }
-  deleteRows_(requests, output, recordsToRestore.map((_, i) => i + 1));
+  deleteRows_(requests, output, recordIndexes);
   deleteRows_(requests, ledger, winnerRows);
   // Keep a zero-count record so retries cannot redraw a transaction canceled by a reset.
   requests.push(write_(db.tabs.DRAW_HISTORY.sheetId, 1, SYSTEM.DRAW_HISTORY.length - 1,
     db.history.map(draw => [draw.prizeId === prize.id ? 0 : draw.count])));
   commit_(db, requests);
-  return { restored: recordsToRestore.length };
+  return { restored: recordIndexes.length };
 }
 
 function receipt_(db, draw, reelNames) {

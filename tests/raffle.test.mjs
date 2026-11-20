@@ -155,6 +155,33 @@ test('prize reset restores whole records and preserves other awards and transact
   assert.equal(ok(app.request('receipt', { tx: fresh.tx })).count, 2);
 });
 
+test('prize reset identifies unmatched IDs and restores winners across blank rows', () => {
+  const app = fixture();
+  app.initialize();
+  const header = ['Name', 'Participant ID'];
+  app.loadRoster([header, ['Same name', '001'], ['Same name', '002']]);
+  const name = 'Grand Prize';
+  const prizeId = ok(app.request('prize', { name, limit: 2, perDraw: 2 })).id;
+  const throughTx = randomUUID();
+  ok(app.request('draw', { tx: throughTx, prizeId }));
+  const [, first, second] = app.data(name);
+  const reset = { prizeId, throughTx };
+  const writes = app.writes();
+  for (const id of ['', 'Unexpected', first[1]]) {
+    app.loadRows(name, [header, first, [], [second[0], id]]);
+    const reply = app.request('resetPrize', reset);
+    assert.equal(reply.code, 'INTEGRITY');
+    assert.match(reply.message, /prize worksheet rows 4\./);
+    assert.equal(app.writes(), writes);
+  }
+  app.loadRows(name, [header, first]);
+  assert.match(app.request('resetPrize', reset).message, /1 row with data\. DRAW_WINNERS lists 2 winners/);
+  app.loadRows(name, [header, first, [], second]);
+  assert.equal(ok(app.request('resetPrize', reset)).restored, 2);
+  assert.deepEqual(app.data('ALL IMS'), [header, first, second]);
+  assert.deepEqual(app.data(name), [header]);
+});
+
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {
   const steps = 52;
   const sequence = Array.from({ length: 11 }, (_, i) => positionAt(i / 10, steps));
