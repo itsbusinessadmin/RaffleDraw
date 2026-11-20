@@ -92,6 +92,7 @@ function startOperator() {
   const reel = new Reel($('stage').querySelector('.reel'));
   const scope = 'raffle:' + location.pathname + ':';
   const savedEndpoint = scope + 'endpoint';
+  const sessionKey = scope + 'connection';
   const projectorKey = scope + 'projector';
   const projectorId = sessionStorage.getItem(projectorKey) || crypto.randomUUID();
   sessionStorage.setItem(projectorKey, projectorId);
@@ -200,6 +201,23 @@ function startOperator() {
     renderDashboard();
   }
 
+  function endSession() {
+    sessionStorage.removeItem(sessionKey);
+    token = '';
+    refreshSequence++;
+    state = null;
+    run = null;
+    syncError = '';
+    clearTimeout(advanceTimer);
+    cancelAnimationFrame(frame);
+    renderResults('operator-results', null);
+    connectionStatus('Disconnected', 'idle');
+    say('connection', 'Connect');
+    say('updated', 'Google Sheets');
+    showMessage('issue');
+    renderDashboard();
+  }
+
   async function refresh(force = false) {
     if (!token || (updating && !force)) return;
     updating++;
@@ -215,7 +233,9 @@ function startOperator() {
       }
     } catch (error) {
       if (sequence !== refreshSequence || keyAtStart !== token || endpointAtStart !== endpoint) return;
-      connectionStatus(error.code === 'UNAUTHORIZED' ? 'Key rejected' : 'Sync interrupted', 'error');
+      const rejected = error.code === 'UNAUTHORIZED';
+      if (rejected) endSession();
+      connectionStatus(rejected ? 'Key rejected' : 'Sync interrupted', 'error');
       syncError = error.message;
       showMessage('issue', syncError);
     } finally {
@@ -494,19 +514,8 @@ function startOperator() {
   });
   $('disconnect-confirm').addEventListener('click', () => {
     if (mutation) return;
-    token = '';
-    refreshSequence++;
-    state = null;
-    run = null;
-    clearTimeout(advanceTimer);
-    cancelAnimationFrame(frame);
-    renderResults('operator-results', null);
-    connectionStatus('Disconnected', 'idle');
-    say('connection', 'Connect');
-    say('updated', 'Google Sheets');
-    showMessage('issue');
     $('disconnect-dialog').close();
-    renderDashboard();
+    endSession();
   });
   $('connect-form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -520,6 +529,7 @@ function startOperator() {
       const result = await api('state', {}, url, key);
       endpoint = url;
       localStorage.setItem(savedEndpoint, url);
+      sessionStorage.setItem(sessionKey, JSON.stringify({ endpoint: url, token: key }));
       token = key;
       $('token').value = '';
       $('connect-dialog').close();
@@ -608,5 +618,19 @@ function startOperator() {
   setInterval(() => {
     if (!document.hidden && !mutation && token) refresh();
   }, 30000);
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(sessionKey));
+    if (typeof saved?.token === 'string' && /^[0-9a-f]{64}$/.test(saved.token)) {
+      endpoint = apiURL(saved.endpoint);
+      token = saved.token;
+    }
+  } catch (_) {
+    sessionStorage.removeItem(sessionKey);
+  }
+  if (token) {
+    connectionStatus('Reconnecting…', 'checking');
+    say('connection', 'Disconnect');
+    refresh();
+  }
   renderDashboard();
 }
