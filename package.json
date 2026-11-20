@@ -1,0 +1,10 @@
+{
+  "name": "raffle-draw",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:rehearsal": "node tests/rehearsal.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

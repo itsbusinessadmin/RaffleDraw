@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src https://script.google.com https://script.googleusercontent.com https://*.workers.dev; form-action 'none'">
+  <title>Raffle Draw</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="shell mast-inner">
+      <a class="brand" href="./"><span class="mark" aria-hidden="true"></span>Raffle Draw</a>
+      <div class="mast-actions">
+        <span id="sync" class="sync" role="status"><span></span>Disconnected</span>
+        <button id="connection" class="quiet" type="button">Connect</button>
+      </div>
+    </div>
+  </header>
+  <main id="operator" class="shell">
+    <div class="intro">
+      <h1 id="event">Raffle Draw</h1>
+      <div class="actions">
+        <button id="settings-open" type="button" disabled>Settings</button>
+        <button id="projector-open" type="button">Open projector</button>
+      </div>
+    </div>
+    <nav class="section-nav" aria-label="Dashboard sections">
+      <a href="#draw-section" aria-current="location">Live draw</a>
+      <a href="#prizes-section">Prizes</a>
+      <a href="#history-section">Winner history</a>
+    </nav>
+    <p id="notice" class="notice" role="status" hidden></p>
+    <p id="issue" class="notice error" role="alert" hidden></p>
+    <section id="draw-section" class="draw-layout" aria-labelledby="draw-heading">
+      <div class="stage" id="stage">
+        <div class="stage-head"><h2 id="draw-heading">Live draw</h2><span id="stage-status">Standby</span></div>
+        <div class="reel" aria-hidden="true"></div>
+        <p class="stage-foot" id="stage-caption" aria-live="polite">Connect your spreadsheet to begin</p>
+      </div>
+      <div class="controls">
+        <h2>Draw controls</h2>
+        <label for="prize-select">Prize</label>
+        <select id="prize-select" disabled><option>Select a prize</option></select>
+        <p id="slots" class="hint">Connect to load your prizes.</p>
+        <div class="options">
+          <div><label for="speed">Reveal speed</label><select id="speed"><option value="standard">Standard</option><option value="fast">Fast</option></select></div>
+          <div><label for="advance">Advance</label><select id="advance"><option value="auto">Automatic</option><option value="manual">Manual</option></select></div>
+        </div>
+        <button id="draw" class="primary" type="button" disabled>Draw winners</button>
+        <div id="reveal-actions" class="reveal-actions" hidden>
+          <button id="pause" type="button">Pause</button>
+          <button id="skip" type="button">Skip spin</button>
+          <button id="next" type="button">Next winner</button>
+          <button id="all" type="button">Reveal all</button>
+        </div>
+        <button id="retry" type="button" hidden>Retry pending draw</button>
+        <button id="replay" class="quiet" type="button" hidden>Replay latest draw</button>
+      </div>
+    </section>
+    <ol id="operator-results" aria-label="Revealed winners" class="results" hidden></ol>
+    <dl class="metrics">
+      <div><dt>Total participants</dt><dd id="total">—</dd></div>
+      <div><dt>Eligible to win</dt><dd id="eligible">—</dd></div>
+      <div><dt>Unique winners</dt><dd id="won">—</dd></div>
+    </dl>
+    <section class="dashboard-section" id="prizes-section" aria-labelledby="prizes-heading">
+      <div class="section-head"><h2 id="prizes-heading">Prizes</h2><button id="prize-add" type="button" disabled>Add prize</button></div>
+      <div class="table-wrap">
+        <table><thead><tr><th scope="col">Prize</th><th scope="col">Awarded</th><th scope="col">Per draw</th><th scope="col">Remaining</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="prizes"></tbody></table>
+      </div>
+      <p class="empty" id="prize-empty">Prizes will appear after you connect.</p>
+    </section>
+    <section class="dashboard-section" id="history-section" aria-labelledby="history-heading">
+      <div class="section-head"><h2 id="history-heading">Winner history</h2><input id="search" type="search" aria-label="Search winner history" placeholder="Search winners or prizes" disabled></div>
+      <div class="table-wrap">
+        <table><thead><tr><th scope="col">Winner</th><th scope="col">Prize</th><th scope="col">Draw date</th></tr></thead><tbody id="history"></tbody></table>
+      </div>
+      <p class="empty" id="history-empty">Committed winners will appear here.</p>
+      <button id="history-more" type="button" hidden>Show more</button>
+    </section>
+    <footer><span id="updated">Google Sheets</span><button id="refresh" class="quiet" type="button" disabled>Refresh data</button></footer>
+  </main>
+  <main id="projector" hidden>
+    <header class="projector-head">
+      <div><p id="projector-event">Raffle Draw</p><h1 id="projector-prize">Live draw</h1></div>
+      <button id="fullscreen" type="button">Enter fullscreen</button>
+    </header>
+    <div class="projector-main" id="projector-stage">
+      <p id="projector-position">Waiting for operator</p>
+      <div class="reel" aria-hidden="true"></div>
+      <p id="projector-caption" aria-live="polite">The draw will appear here.</p>
+    </div>
+    <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
+  </main>
+  <dialog id="connect-dialog">
+    <form id="connect-form">
+      <h2>Connect to Google Sheets</h2>
+      <label for="endpoint">Raffle API URL</label>
+      <input id="endpoint" type="url" required placeholder="https://script.google.com/macros/s/…/exec">
+      <label for="token">Administrator key</label>
+      <input id="token" type="password" required autocomplete="off" spellcheck="false" pattern="[0-9a-f]{64}">
+      <p class="hint">Use the web app URL and the administrator key from your Apps Script setup.</p>
+      <p id="connect-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary" id="connect-submit">Connect</button></div>
+    </form>
+  </dialog>
+  <dialog id="settings-dialog">
+    <form id="settings-form">
+      <h2>Event settings</h2>
+      <label for="event-name">Event name</label>
+      <input id="event-name" required maxlength="120">
+      <label for="name-header">Participant name column</label>
+      <select id="name-header" required></select>
+      <p class="hint">Column headings come from row 1 of ALL IMS.</p>
+      <p class="error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save settings</button></div>
+    </form>
+  </dialog>
+  <dialog id="prize-dialog">
+    <form id="prize-form">
+      <h2 id="prize-form-title">Add prize</h2>
+      <label for="prize-name">Prize name</label>
+      <input id="prize-name" required maxlength="100">
+      <p class="hint">This name is also used for the Google Sheets tab.</p>
+      <div class="options">
+        <div><label for="prize-limit">Total winners</label><input id="prize-limit" type="number" min="1" max="100000" required></div>
+        <div><label for="prize-count">Winners per draw</label><input id="prize-count" type="number" min="1" max="1000" required></div>
+      </div>
+      <p class="error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save prize</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
