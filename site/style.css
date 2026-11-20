@@ -1101,10 +1101,13 @@ dialog .error {
   font-size: clamp(1rem, 3.2vw, 2.8rem);
 }
 #projector-results {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
-  max-width: 900px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 10px clamp(24px, 4vw, 56px);
+  max-width: 860px;
   width: 100%;
   margin: 14px auto 0;
+  padding-inline-start: 1.75em;
+  list-style-position: outside;
   color: var(--projector-ivory);
   font-size: clamp(1rem, 1.7vw, 1.3rem);
 }
@@ -1226,6 +1229,9 @@ dialog .error {
     inset-block-start: auto;
     inset-block-end: 18px;
     transform: none;
+  }
+  #projector:fullscreen #projector-results {
+    padding-inline-start: 44px;
   }
 }
 @media (max-width: 1000px) {

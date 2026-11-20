@@ -56,7 +56,7 @@ if (isProjector) {
   for (const dialog of document.querySelectorAll('dialog')) dialog.remove();
   document.body.classList.add('presentation');
   projector.hidden = false;
-  reel.idle('Ready for the draw');
+  reel.idle('');
 
   function drawFrame() {
     const run = live.run;
@@ -87,7 +87,7 @@ if (isProjector) {
     caption.toggleAttribute('data-announcement-only', run?.phase === 'hold');
     caption.toggleAttribute('data-drawing', run?.phase === 'spin' && !run.pausedAt);
     if (!run) {
-      reel.idle('Ready for the draw');
+      reel.idle('');
       showMessage('projector-position');
       say('projector-caption', '');
     } else {
@@ -95,7 +95,8 @@ if (isProjector) {
       showMessage('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
       say('projector-caption', done ? run.revealed + ' winners revealed' :
         run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
-      drawFrame();
+      if (run.phase === 'complete' && run.advance === 'manual') reel.idle('');
+      else drawFrame();
     }
     renderResults('projector-results', run);
   }
