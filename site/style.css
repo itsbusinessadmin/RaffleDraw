@@ -678,6 +678,11 @@ footer {
   flex: 0 0 18px;
   accent-color: var(--accent);
 }
+#prize-participants-count {
+  margin: 5px 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
 #prizes-toggle {
   display: grid;
   place-items: center;

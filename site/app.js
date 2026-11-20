@@ -363,6 +363,7 @@ function startOperator() {
     connectionStatus('Sheets connected', 'connected');
     say('updated', 'Last synced ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
     renderDashboard();
+    if ($('prize-dialog').open) renderPrizeParticipants();
   }
 
   function connectionRecord() {
@@ -804,6 +805,14 @@ function startOperator() {
       (failures.length > 3 ? ' ' + number.format(failures.length - 3) + ' more failed.' : '') : '');
   }
 
+  function renderPrizeParticipants() {
+    const all = $('prize-all-participants').checked;
+    const count = all ? state?.total : state?.eligible;
+    const label = all ? ' total ' : ' eligible ';
+    showMessage('prize-participants-count', Number.isFinite(count)
+      ? number.format(count) + label + (count === 1 ? 'participant' : 'participants') : '');
+  }
+
   function openPrize(prize) {
     editingPrize = prize?.id || '';
     say('prize-form-title', prize ? 'Edit prize' : 'Add prize');
@@ -811,6 +820,7 @@ function startOperator() {
     $('prize-limit').value = prize?.limit || 1;
     $('prize-count').value = prize?.perDraw || 1;
     $('prize-all-participants').checked = prize?.allParticipants ?? false;
+    renderPrizeParticipants();
     $('prize-all-participants').disabled = !state?.allParticipantsMode;
     say('prize-participants-hint', state?.allParticipantsMode
       ? 'Include earlier winners. Each person can win this prize once.'
@@ -983,6 +993,7 @@ function startOperator() {
     button.setAttribute('aria-label', label);
     button.title = label;
   });
+  $('prize-all-participants').addEventListener('change', renderPrizeParticipants);
   $('prize-form').addEventListener('submit', event => {
     event.preventDefault();
     saveForm(event.currentTarget, 'prize', {
