@@ -4,6 +4,7 @@ import { Reel, duration, HOLD, DEFAULT_REVEAL_SECONDS, DEFAULT_NAMES_PER_SECOND 
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat();
 const holdMessage = 'You can continue after the winner display time.';
+const redrawEndpointMessage = 'Re-draw is unavailable at this API URL. Check that the dashboard is connected to the updated deployment’s /exec URL.';
 const timingFields = [
   ['reveal-seconds', 'revealSeconds', DEFAULT_REVEAL_SECONDS],
   ['names-per-second', 'namesPerSecond', DEFAULT_NAMES_PER_SECOND],
@@ -89,11 +90,9 @@ if (isProjector) {
     let actionLabel = revealing ? 'Drawing…' : 'Draw';
     if (manualHold) actionLabel = run.revealed === run.receipt.count ? 'Finish draw' : 'Next winner';
     say('projector-action-button', actionLabel);
-    const redrawRequiresUpdate = live.redrawSupported === false;
-    const redrawUpdateMessage = 'Deploy the updated Google Apps Script to enable Re-draw.';
-    showMessage('projector-hold-note', redrawRequiresUpdate ? redrawUpdateMessage : manualHold && !nextReady ? holdMessage : '');
+    showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
     redrawButton.disabled = !live.canRedraw;
-    redrawButton.title = live.canRedraw ? '' : redrawRequiresUpdate ? redrawUpdateMessage : 'Available while a winner is on the ticket.';
+    redrawButton.title = live.canRedraw ? '' : 'Available while a winner is on the ticket.';
     if (live.redrawPrompt && document.fullscreenElement === projector) {
       if (!redrawDialog.open) {
         redrawWinner.replaceChildren(...run.receipt.winners.slice(0, run.revealed).map((name, index) =>
@@ -246,11 +245,11 @@ function startOperator() {
     return scope + 'pending:' + endpoint + ':';
   }
 
-  function pending() {
+  function pending(matches = () => true) {
     const prefix = pendingPrefix();
     const stored = Object.keys(localStorage).filter(key => key.startsWith(prefix)).map(key => {
       try { return JSON.parse(localStorage.getItem(key)); } catch (_) { return null; }
-    }).filter(value => value?.tx && value?.prizeId);
+    }).filter(value => value?.tx && value?.prizeId && matches(value));
     const owned = stored.find(item => item.tx === sessionStorage.getItem(scope + 'draw'));
     return owned || stored.sort((a, b) => b.started - a.started)[0];
   }
@@ -309,7 +308,7 @@ function startOperator() {
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
       drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
       advanceEditable: !!state && !!token && !active() && !mutation,
-      nextReady: canAdvance(), canRedraw: canPromptRedraw(), redrawSupported: state ? !!state.redrawMode : null,
+      nextReady: canAdvance(), canRedraw: canPromptRedraw(),
       redrawPrompt, redrawError,
       redrawBusy: redrawPrompt && mutation, redrawPending: redrawPrompt ? pendingRedraw()?.position : null
     });
@@ -440,8 +439,8 @@ function startOperator() {
     }
     if (message?.type === 'redraw-confirm' && redrawPrompt && !mutation) {
       const retry = pendingRedraw();
-      if (!retry && pending()) {
-        redrawError = 'Resolve the pending draw before replacing this winner.';
+      if (!retry && pending(item => item.drawTx === run.receipt.tx)) {
+        redrawError = 'Resolve the pending re-draw for this batch before replacing another winner.';
         publish();
         return;
       }
@@ -681,14 +680,13 @@ function startOperator() {
   }
 
   function canPromptRedraw() {
-    return !!state?.redrawMode && !!token && run?.phase === 'hold' && !run.pausedAt &&
-      !mutation && !pending();
+    return !!token && run?.phase === 'hold' && !run.pausedAt && !mutation;
   }
 
   function pendingRedraw() {
-    const request = pending();
-    return run && request?.drawTx === run.receipt.tx && request.throughRedrawTx === run.receipt.redrawTx &&
-      request.position >= 1 && request.position <= run.revealed ? request : null;
+    if (!run) return null;
+    return pending(request => request.drawTx === run.receipt.tx && request.throughRedrawTx === run.receipt.redrawTx &&
+      request.position >= 1 && request.position <= run.revealed);
   }
 
   function renderBulkActions() {
@@ -869,12 +867,14 @@ function startOperator() {
       redrawPrompt = false;
       if (token) begin(receipt, request);
     } catch (error) {
+      const unsupportedRedraw = request.drawTx && error.code === 'BAD_REQUEST' && /^Unknown action\.?$/i.test(error.message);
+      const message = unsupportedRedraw ? redrawEndpointMessage : error.message;
       const definitive = ['VALIDATION', 'NOT_FOUND', 'CONFLICT'].includes(error.code) ||
-        (request.drawTx && error.code === 'INTEGRITY');
+        (request.drawTx && error.code === 'INTEGRITY') || unsupportedRedraw;
       if (definitive) clearPending(request.tx);
-      if (request.drawTx) redrawError = error.message;
-      showMessage('issue', definitive ? error.message :
-        error.message + ' Use Retry pending draw to check or complete transaction ' + request.tx + '.');
+      if (request.drawTx) redrawError = message;
+      showMessage('issue', definitive ? message :
+        message + ' Use Retry pending draw to check or complete transaction ' + request.tx + '.');
     } finally {
       mutation = false;
       renderControls();
