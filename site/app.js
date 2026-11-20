@@ -1,5 +1,6 @@
 import { API_URL } from './config.js';
-import { Reel, duration, HOLD, DEFAULT_REVEAL_SECONDS, DEFAULT_NAMES_PER_SECOND } from './reel.js';
+import { duration, HOLD, DEFAULT_REVEAL_SECONDS, DEFAULT_NAMES_PER_SECOND } from './reel.js';
+import { DrawStage, DEFAULT_WHEEL_SECONDS, DEFAULT_WHEEL_NAMES_PER_SECOND } from './draw-stage.js';
 
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat();
@@ -8,7 +9,9 @@ const redrawEndpointMessage = 'Re-draw is unavailable at this API URL. Check tha
 const timingFields = [
   ['reveal-seconds', 'revealSeconds', DEFAULT_REVEAL_SECONDS],
   ['names-per-second', 'namesPerSecond', DEFAULT_NAMES_PER_SECOND],
-  ['winner-seconds', 'winnerSeconds', HOLD.standard / 1000]
+  ['winner-seconds', 'winnerSeconds', HOLD.standard / 1000],
+  ['wheel-seconds', 'wheelSeconds', DEFAULT_WHEEL_SECONDS],
+  ['wheel-names-per-second', 'wheelNamesPerSecond', DEFAULT_WHEEL_NAMES_PER_SECOND]
 ];
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const audience = new URLSearchParams(location.hash.slice(1)).get('projector');
@@ -48,7 +51,7 @@ function renderResults(id, run) {
 
 if (isProjector) {
   const channel = new BroadcastChannel('raffle-projector-' + audience);
-  const reel = new Reel($('projector-stage').querySelector('.reel'));
+  const stage = new DrawStage($('projector-stage').querySelector('.reel'));
   const projector = $('projector');
   const actionButton = $('projector-action-button');
   const advanceSelect = $('projector-advance');
@@ -65,12 +68,12 @@ if (isProjector) {
   for (const dialog of document.querySelectorAll('dialog:not(#redraw-dialog)')) dialog.remove();
   document.body.classList.add('presentation');
   projector.hidden = false;
-  reel.idle('');
+  stage.idle('');
 
   function drawFrame() {
     const run = live.run;
     const now = Date.now();
-    reel.show(run, now);
+    stage.show(run, now);
     if (run.phase === 'spin' && !run.pausedAt && now - run.start < run.spin) {
       frame = requestAnimationFrame(drawFrame);
     }
@@ -115,7 +118,7 @@ if (isProjector) {
     caption.toggleAttribute('data-announcement-only', run?.phase === 'hold');
     caption.toggleAttribute('data-drawing', run?.phase === 'spin' && !run.pausedAt);
     if (!run) {
-      reel.idle('');
+      stage.idle('', live.drawTheme);
       showMessage('projector-position');
       say('projector-caption', '');
     } else {
@@ -194,7 +197,7 @@ if (isProjector) {
 }
 
 function startOperator() {
-  const reel = new Reel($('stage').querySelector('.reel'));
+  const stage = new DrawStage($('stage').querySelector('.reel'));
   const scope = 'raffle:' + location.pathname + ':';
   const savedEndpoint = scope + 'endpoint';
   const sessionKey = scope + 'connection';
@@ -306,6 +309,7 @@ function startOperator() {
     channel.postMessage({
       type: 'state', eventName: state?.eventName || 'Raffle Draw',
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
+      drawTheme: run?.drawTheme || state?.drawTheme,
       drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
       advanceEditable: !!state && !!token && !active() && !mutation,
       nextReady: canAdvance(), canRedraw: canPromptRedraw(),
@@ -327,6 +331,7 @@ function startOperator() {
       prizeId: run?.receipt.prizeId || selected,
       prizeName: run?.receipt.prizeName || state.prizes.find(prize => prize.id === selected)?.name || '',
       advance: run?.advance || $('advance').value,
+      drawTheme: run?.drawTheme || state.drawTheme,
       run: run && {
         tx: run.receipt.tx, phase: run.phase, index: run.index, revealed: run.revealed, speed: run.speed, spin: run.spin,
         namesPerSecond: run.namesPerSecond,
@@ -388,7 +393,7 @@ function startOperator() {
           const localTime = Date.now();
           const age = details.paused ? 0 : Math.max(0, now - snapshot.updatedAt);
           remoteRun = {
-            ...details, receipt, advance: snapshot.advance,
+            ...details, receipt, advance: snapshot.advance, drawTheme: snapshot.drawTheme,
             start: localTime - details.elapsed - age, pausedAt: details.paused ? localTime : null
           };
         }
@@ -396,7 +401,8 @@ function startOperator() {
       if (endpoint !== url || token !== key || generation !== presentationGeneration || writingPresentation || active()) return;
       presentationRevision = snapshot?.revision || null;
       remotePresentation = snapshot && snapshot.origin !== presentationOrigin ? {
-        eventName: snapshot.eventName, prizeName: snapshot.prizeName, advance: snapshot.advance, run: remoteRun
+        eventName: snapshot.eventName, prizeName: snapshot.prizeName, advance: snapshot.advance,
+        drawTheme: snapshot.drawTheme, run: remoteRun
       } : null;
       publish();
     } catch (_) {
@@ -452,7 +458,7 @@ function startOperator() {
       }
       const request = retry || {
         tx: crypto.randomUUID(), started: Date.now(), drawTx: run.receipt.tx, prizeId: run.receipt.prizeId,
-        position, revealed: run.revealed, throughRedrawTx: run.receipt.redrawTx, advance: run.advance,
+        position, revealed: run.revealed, throughRedrawTx: run.receipt.redrawTx, advance: run.advance, drawTheme: run.drawTheme,
         revealSeconds: run.spin / 1000, namesPerSecond: run.namesPerSecond, winnerSeconds: run.hold / 1000
       };
       commitDraw(request);
@@ -750,7 +756,7 @@ function startOperator() {
     say('pause', run?.pausedAt ? 'Resume' : 'Pause');
     if (!run) {
       const label = prize ? 'Ready to draw' : 'Waiting for a prize';
-      reel.idle(label);
+      stage.idle(label, state?.drawTheme);
       say('stage-status', prize?.name || 'Standby');
       say('stage-caption', state ? (prize ? 'Choose Draw winners to begin' : 'Set up a prize to begin') : 'Connect Google Sheets to load your prizes');
     }
@@ -760,7 +766,7 @@ function startOperator() {
   function drawFrame() {
     cancelAnimationFrame(frame);
     if (!run) return;
-    reel.show(run, Date.now());
+    stage.show(run, Date.now());
     if (run.phase === 'spin' && !run.pausedAt && Date.now() - run.start < run.spin) frame = requestAnimationFrame(drawFrame);
   }
 
@@ -831,7 +837,7 @@ function startOperator() {
     const seconds = options.winnerSeconds;
     const index = options.drawTx ? options.position - 1 : 0;
     run = {
-      receipt, speed, advance: options.advance || $('advance').value, index,
+      receipt, speed, advance: options.advance || $('advance').value, index, drawTheme: options.drawTheme || 'reel',
       phase: 'spin', start: Date.now(),
       spin: duration(speed, reduceMotion.matches, options.revealSeconds ?? state?.revealSeconds),
       namesPerSecond: options.namesPerSecond,
@@ -843,10 +849,13 @@ function startOperator() {
 
   function startDraw() {
     if (!offeredDraw || pending()) return;
+    const drawTheme = state?.drawTheme || 'reel';
+    const wheel = drawTheme === 'wheel';
     commitDraw({
-      ...offeredDraw, started: Date.now(), advance: $('advance').value,
-      revealSeconds: state?.revealSeconds ?? DEFAULT_REVEAL_SECONDS,
-      namesPerSecond: state?.namesPerSecond, winnerSeconds: state?.winnerSeconds
+      ...offeredDraw, started: Date.now(), advance: $('advance').value, drawTheme,
+      revealSeconds: wheel ? state.wheelSeconds ?? DEFAULT_WHEEL_SECONDS : state?.revealSeconds ?? DEFAULT_REVEAL_SECONDS,
+      namesPerSecond: wheel ? state.wheelNamesPerSecond ?? DEFAULT_WHEEL_NAMES_PER_SECOND : state?.namesPerSecond,
+      winnerSeconds: wheel ? undefined : state?.winnerSeconds
     });
   }
 
@@ -1095,27 +1104,42 @@ function startOperator() {
       submit.disabled = false;
     }
   });
+  function renderThemeSettings() {
+    const wheel = $('draw-theme').value === 'wheel';
+    $('wheel-settings').disabled = $('wheel-settings').hidden = !wheel;
+    $('reel-settings').disabled = $('reel-settings').hidden = wheel;
+  }
+  $('draw-theme').addEventListener('change', renderThemeSettings);
   $('settings-open').addEventListener('click', () => {
     $('event-name').value = state.eventName;
     $('name-header').replaceChildren(new Option('Select a column', ''),
       ...state.headers.map(name => new Option(name, name)));
     $('name-header').value = state.nameHeader || '';
+    $('draw-theme').value = state.drawTheme || 'reel';
+    $('draw-theme').disabled = !state.drawTheme;
     for (const [id, key, fallback] of timingFields) {
       $(id).value = state[key] ?? fallback;
       $(id).disabled = !Number.isFinite(state[key]);
     }
-    showMessage('timing-update-hint', timingFields.some(([id]) => $(id).disabled)
-      ? 'Deploy the updated Apps Script version to enable all timing settings.' : '');
+    renderThemeSettings();
+    showMessage('timing-update-hint', $('draw-theme').disabled || timingFields.some(([id]) => $(id).disabled)
+      ? 'Deploy the updated Apps Script version to enable draw themes and all timing settings.' : '');
     formError($('settings-form'));
     $('settings-dialog').showModal();
   });
   $('settings-form').addEventListener('submit', event => {
     event.preventDefault();
     const values = { eventName: $('event-name').value, nameHeader: $('name-header').value };
+    if (!$('draw-theme').disabled) values.drawTheme = $('draw-theme').value;
     for (const [id, key] of timingFields) {
-      if (!$(id).disabled) values[key] = $(id).valueAsNumber;
+      if ($(id).matches(':enabled')) values[key] = $(id).valueAsNumber;
     }
-    saveForm(event.currentTarget, 'settings', values);
+    saveForm(event.currentTarget, 'settings', values, () => {
+      if (values.drawTheme && values.drawTheme !== state.drawTheme) {
+        state.drawTheme = values.drawTheme;
+        if (!active()) selectPrize(selected);
+      }
+    });
   });
   $('archived-open').addEventListener('click', () => {
     selectingArchived = false;

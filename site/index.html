@@ -207,14 +207,29 @@
       <label for="name-header">Participant name column</label>
       <select id="name-header" required></select>
       <p class="hint">Column headings come from row 1 of ALL IMS.</p>
-      <label for="reveal-seconds">Spin duration (seconds)</label>
-      <input id="reveal-seconds" type="number" min="1" max="60" step="0.1" required aria-describedby="reveal-seconds-hint">
-      <p id="reveal-seconds-hint" class="hint">How long the reel spins before each winner is revealed.</p>
-      <label for="names-per-second">Name scroll speed (names per second)</label>
-      <input id="names-per-second" type="number" min="1" max="30" step="1" required>
-      <label for="winner-seconds">Winner display time (seconds)</label>
-      <input id="winner-seconds" type="number" min="1" max="60" step="0.1" required aria-describedby="winner-seconds-hint">
-      <p id="winner-seconds-hint" class="hint">Automatic advances after this time. Manual enables Next winner or Finish draw after the same wait.</p>
+      <label for="draw-theme">Draw theme</label>
+      <select id="draw-theme">
+        <option value="reel">Ticket reel</option>
+        <option value="wheel">Spin the wheel</option>
+      </select>
+      <fieldset id="reel-settings" class="draw-theme-settings" aria-label="Ticket reel timing">
+        <label for="reveal-seconds">Spin duration (seconds)</label>
+        <input id="reveal-seconds" type="number" min="1" max="60" step="0.1" required aria-describedby="reveal-seconds-hint">
+        <p id="reveal-seconds-hint" class="hint">How long the reel spins before each winner is revealed.</p>
+        <label for="names-per-second">Name scroll speed (names per second)</label>
+        <input id="names-per-second" type="number" min="1" max="30" step="1" required>
+        <label for="winner-seconds">Winner display time (seconds)</label>
+        <input id="winner-seconds" type="number" min="1" max="60" step="0.1" required aria-describedby="winner-seconds-hint">
+        <p id="winner-seconds-hint" class="hint">Automatic advances after this time. Manual enables Next winner or Finish draw after the same wait.</p>
+      </fieldset>
+      <fieldset id="wheel-settings" class="draw-theme-settings" aria-label="Wheel timing" hidden disabled>
+        <label for="wheel-seconds">Wheel spin duration (seconds)</label>
+        <input id="wheel-seconds" type="number" min="1" max="60" step="0.1" required aria-describedby="wheel-seconds-hint">
+        <p id="wheel-seconds-hint" class="hint">How long the wheel spins before landing on a winner.</p>
+        <label for="wheel-names-per-second">Wheel name speed (names per second)</label>
+        <input id="wheel-names-per-second" type="number" min="1" max="30" step="1" required aria-describedby="wheel-rate-hint">
+        <p id="wheel-rate-hint" class="hint">How many name slots pass the pointer per second on average.</p>
+      </fieldset>
       <p id="timing-update-hint" class="hint" hidden></p>
       <p class="error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save settings</button></div>

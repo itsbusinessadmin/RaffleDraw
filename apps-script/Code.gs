@@ -8,6 +8,8 @@ const REDRAW = 'redraw:';
 const DEFAULT_REVEAL_SECONDS = 4.8;
 const DEFAULT_NAMES_PER_SECOND = 11;
 const DEFAULT_WINNER_SECONDS = 1.8;
+const DEFAULT_WHEEL_SECONDS = 6;
+const DEFAULT_WHEEL_NAMES_PER_SECOND = 12;
 const MAX_REVEAL_SECONDS = 60;
 const SYSTEM = {
   SETTINGS: ['key', 'value'],
@@ -96,11 +98,12 @@ function presentation_(cfg) {
 }
 
 function publishPresentation_(cfg, input) {
-  const { kind, origin, eventName, prizeId, prizeName, advance, run } = input;
+  const { kind, origin, eventName, prizeId, prizeName, advance, run, drawTheme } = input;
   if (!['selection', 'begin', 'continue'].includes(kind) || typeof origin !== 'string' || !UUID.test(origin) ||
       typeof eventName !== 'string' || eventName.length > 120 || typeof prizeName !== 'string' || prizeName.length > 100 ||
       (prizeId !== '' && (typeof prizeId !== 'string' || !UUID.test(prizeId))) ||
-      !['auto', 'manual'].includes(advance)) fail_('VALIDATION', 'Invalid projector update.');
+      !['auto', 'manual'].includes(advance) ||
+      (drawTheme !== undefined && !validDrawTheme_(drawTheme))) fail_('VALIDATION', 'Invalid projector update.');
   let reveal = null;
   if (kind !== 'selection') {
     const tx = tx_(run?.tx);
@@ -123,7 +126,7 @@ function publishPresentation_(cfg, input) {
     }
     reveal = { tx, phase, index, revealed, elapsed, spin, speed, paused, namesPerSecond, redrawTx };
   }
-  const snapshot = { origin, eventName, prizeId, prizeName, advance, run: reveal,
+  const snapshot = { origin, eventName, prizeId, prizeName, advance, drawTheme, run: reveal,
     updatedAt: Date.now(), revision: Utilities.getUuid() };
   PropertiesService.getScriptProperties().setProperty(presentationKey_(cfg), JSON.stringify(snapshot));
   return { published: true };
@@ -346,11 +349,17 @@ function database_(id) {
   const revealSeconds = settings.get('revealSeconds');
   const namesPerSecond = settings.get('namesPerSecond');
   const winnerSeconds = settings.get('winnerSeconds');
+  const drawTheme = settings.get('drawTheme');
+  const wheelSeconds = settings.get('wheelSeconds');
+  const wheelNamesPerSecond = settings.get('wheelNamesPerSecond');
   return { id, tabs, guard, source, bookSheets: book.sheets, data, headers, rawHeaders, nameHeader, idColumn, eligible, invalid, excluded, history,
     winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds, settings,
     revealSeconds: validDurationSeconds_(revealSeconds) ? revealSeconds : DEFAULT_REVEAL_SECONDS,
     namesPerSecond: validNameRate_(namesPerSecond) ? namesPerSecond : DEFAULT_NAMES_PER_SECOND,
     winnerSeconds: validDurationSeconds_(winnerSeconds) ? winnerSeconds : DEFAULT_WINNER_SECONDS,
+    drawTheme: validDrawTheme_(drawTheme) ? drawTheme : 'reel',
+    wheelSeconds: validDurationSeconds_(wheelSeconds) ? wheelSeconds : DEFAULT_WHEEL_SECONDS,
+    wheelNamesPerSecond: validNameRate_(wheelNamesPerSecond) ? wheelNamesPerSecond : DEFAULT_WHEEL_NAMES_PER_SECOND,
     eventName: String(data.SETTINGS[1][1] || 'Raffle Draw') };
 }
 
@@ -393,6 +402,7 @@ function state_(db) {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
     presentationSync: true, allParticipantsMode: true, redrawMode: true, revealSeconds: db.revealSeconds,
     namesPerSecond: db.namesPerSecond, winnerSeconds: db.winnerSeconds,
+    drawTheme: db.drawTheme, wheelSeconds: db.wheelSeconds, wheelNamesPerSecond: db.wheelNamesPerSecond,
     total: db.eligible.length + db.invalid + db.winsByParticipant.size, eligible: db.eligible.length, won: db.winsByParticipant.size,
     invalid: db.invalid, excluded: db.excluded, prizes: db.prizes, lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {
@@ -410,6 +420,10 @@ function validNameRate_(value) {
   return Number.isInteger(value) && value >= 1 && value <= 30;
 }
 
+function validDrawTheme_(value) {
+  return value === 'reel' || value === 'wheel';
+}
+
 function saveSettings_(db, input) {
   const name = typeof input.eventName === 'string' ? input.eventName.trim() : '';
   if (!name || name.length > 120) fail_('VALIDATION', 'Enter an event name of 1–120 characters.');
@@ -418,16 +432,23 @@ function saveSettings_(db, input) {
   }
   const requests = [write_(db.tabs.SETTINGS.sheetId, 1, 0, [['eventName', name], ['nameHeader', input.nameHeader]])];
   const timing = [];
-  for (const [key, label] of [['revealSeconds', 'spin duration'], ['winnerSeconds', 'winner display time']]) {
+  for (const [key, label] of [
+    ['revealSeconds', 'spin duration'], ['winnerSeconds', 'winner display time'], ['wheelSeconds', 'wheel spin duration']
+  ]) {
     if (input[key] === undefined) continue;
     if (!validDurationSeconds_(input[key])) {
       fail_('VALIDATION', 'Enter a ' + label + ' from 1 to 60 seconds with up to one decimal place.');
     }
     timing.push([key, input[key]]);
   }
-  if (input.namesPerSecond !== undefined) {
-    if (!validNameRate_(input.namesPerSecond)) fail_('VALIDATION', 'Enter a name scroll speed from 1 to 30 names per second.');
-    timing.push(['namesPerSecond', input.namesPerSecond]);
+  for (const key of ['namesPerSecond', 'wheelNamesPerSecond']) {
+    if (input[key] === undefined) continue;
+    if (!validNameRate_(input[key])) fail_('VALIDATION', 'Enter a name speed from 1 to 30 names per second.');
+    timing.push([key, input[key]]);
+  }
+  if (input.drawTheme !== undefined) {
+    if (!validDrawTheme_(input.drawTheme)) fail_('VALIDATION', 'Choose Ticket reel or Spin the wheel.');
+    timing.push(['drawTheme', input.drawTheme]);
   }
   if (timing.length) writeSettings_(db, requests, timing);
   commit_(db, requests);

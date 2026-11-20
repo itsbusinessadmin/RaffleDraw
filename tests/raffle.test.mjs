@@ -379,20 +379,41 @@ test('event settings persist spin duration, name scroll speed, and winner displa
   assert.equal(duration('standard', true, 60), 0);
 });
 
+test('wheel settings persist independently from ticket reel settings', () => {
+  const app = fixture();
+  app.initialize();
+  const settings = { eventName: 'Party', nameHeader: 'Name' };
+  const defaults = ok(app.request('state'));
+  assert.deepEqual([defaults.drawTheme, defaults.wheelSeconds, defaults.wheelNamesPerSecond], ['reel', 6, 12]);
+  assert.equal(app.request('settings', { ...settings, drawTheme: 'other' }).code, 'VALIDATION');
+  assert.equal(app.request('settings', { ...settings, wheelSeconds: 0 }).code, 'VALIDATION');
+  assert.equal(app.request('settings', { ...settings, wheelNamesPerSecond: 31 }).code, 'VALIDATION');
+  ok(app.request('settings', { ...settings, revealSeconds: 4, namesPerSecond: 9, winnerSeconds: 8 }));
+  ok(app.request('settings', { ...settings, drawTheme: 'wheel', wheelSeconds: 7.5, wheelNamesPerSecond: 18 }));
+  const wheel = ok(app.request('state'));
+  assert.deepEqual([wheel.drawTheme, wheel.wheelSeconds, wheel.wheelNamesPerSecond], ['wheel', 7.5, 18]);
+  assert.deepEqual([wheel.revealSeconds, wheel.namesPerSecond, wheel.winnerSeconds], [4, 9, 8]);
+  ok(app.request('settings', { ...settings, drawTheme: 'reel' }));
+  const reel = ok(app.request('state'));
+  assert.deepEqual([reel.drawTheme, reel.wheelSeconds, reel.wheelNamesPerSecond], ['reel', 7.5, 18]);
+});
+
 test('projector sync shares selections and committed draw progress across operators', () => {
   const app = fixture();
   app.initialize();
   app.loadRoster([['Name', 'Participant ID'], ['First', '001'], ['Second', '002']]);
   const prizeId = ok(app.request('prize', { name: 'Phone Prize', limit: 2, perDraw: 1 })).id;
-  const screen = { origin: randomUUID(), eventName: 'Raffle Draw', prizeId, prizeName: 'Phone Prize', advance: 'manual' };
+  const screen = { origin: randomUUID(), eventName: 'Raffle Draw', prizeId, prizeName: 'Phone Prize', advance: 'manual', drawTheme: 'wheel' };
   assert.equal(ok(app.request('state')).presentationSync, true);
   assert.equal(ok(app.request('presentation')).snapshot, null);
   assert.equal(app.request('presentation', {}, 'wrong').code, 'UNAUTHORIZED');
   assert.equal(app.request('publishPresentation', { ...screen, kind: 'selection' }, 'wrong').code, 'UNAUTHORIZED');
+  assert.equal(app.request('publishPresentation', { ...screen, kind: 'selection', drawTheme: 'other' }).code, 'VALIDATION');
   const sheetsWrites = app.writes();
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'selection' })).published, true);
   const { snapshot } = ok(app.request('presentation'));
   assert.equal(snapshot.prizeName, 'Phone Prize');
+  assert.equal(snapshot.drawTheme, 'wheel');
   assert.equal(snapshot.run, null);
   assert.equal(app.writes(), sheetsWrites);
 
@@ -407,6 +428,7 @@ test('projector sync shares selections and committed draw progress across operat
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'continue', run: hold })).published, true);
   const current = ok(app.request('presentation')).snapshot;
   assert.equal(current.run.phase, 'hold');
+  assert.equal(current.drawTheme, 'wheel');
   assert.equal(current.run.tx, tx);
   assert.equal(current.run.spin, 60000);
   assert.equal(current.run.namesPerSecond, 7);
