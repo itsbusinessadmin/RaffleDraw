@@ -300,7 +300,8 @@ footer {
   display: grid;
   gap: 4px;
 }
-.section-nav a {
+.section-nav a,
+#archived-open {
   display: flex;
   align-items: center;
   min-height: 42px;
@@ -311,7 +312,8 @@ footer {
   font-size: 0.875rem;
   font-weight: 650;
 }
-.section-nav a:hover {
+.section-nav a:hover,
+#archived-open:hover {
   background: #f0ebf7;
   color: var(--accent-strong);
 }
@@ -621,8 +623,35 @@ footer {
 .section-head {
   margin-bottom: 11px;
 }
-.section-head input {
-  max-width: 245px;
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 10px 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+.prize-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  margin: 0;
+  cursor: pointer;
+}
+.prize-check input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  flex: 0 0 18px;
+  accent-color: var(--accent);
 }
 #prizes-toggle {
   display: grid;
@@ -655,9 +684,6 @@ table {
   text-align: left;
   min-width: 530px;
   font-size: 0.875rem;
-}
-#history-section table {
-  min-width: 350px;
 }
 th,
 td {
@@ -785,9 +811,6 @@ td progress {
   color: var(--muted);
   font-size: 0.875rem;
 }
-#history-more {
-  margin-top: 10px;
-}
 footer {
   border-top: 1px solid var(--line);
   margin-top: 25px;
@@ -828,6 +851,22 @@ dialog::backdrop {
 }
 dialog h2 {
   margin-bottom: 19px;
+}
+.archived-list {
+  max-block-size: 52dvh;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.archived-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
 }
 .dialog-copy {
   color: var(--muted);
@@ -1010,8 +1049,15 @@ dialog .error {
   #prizes-section td:first-child {
     min-width: 160px;
   }
-  .section-head input {
-    max-width: 54%;
+  #prizes-section .section-head {
+    gap: 8px;
+  }
+  #prizes-section .section-head .actions {
+    gap: 6px;
+  }
+  #prizes-section .section-head .actions button:not(#prizes-toggle),
+  .bulk-actions button {
+    padding-inline: 10px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

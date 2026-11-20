@@ -290,6 +290,7 @@ function dispatch_(cfg, input) {
     case 'settings': return saveSettings_(db, input);
     case 'prize': return savePrize_(db, input);
     case 'archivePrize': return archivePrize_(db, input);
+    case 'deletePrize': return deletePrize_(db, input);
     case 'resetPrize': return resetPrize_(db, input);
     case 'draw': return draw_(db, cfg.random, input);
     case 'receipt': {
@@ -405,7 +406,12 @@ function resetPrize_(db, input) {
   if (prize.archived) fail_('VALIDATION', 'Restore this archived prize before resetting it.');
   const draws = db.history.filter(draw => draw.prizeId === prize.id && draw.count);
   if (draws.at(-1)?.tx !== throughTx) fail_('CONFLICT', 'This prize changed. Refresh data and confirm the reset again.');
+  const requests = resetPrizeRequests_(db, prize);
+  commit_(db, requests);
+  return { restored: prize.won };
+}
 
+function resetPrizeRequests_(db, prize, removeSheet = false) {
   const output = db.tabs[prize.name];
   const roster = db.tabs[ROSTER];
   const records = rows_(db.id, [prize.name])[prize.name];
@@ -471,16 +477,36 @@ function resetPrize_(db, input) {
     }
   }
   const ledger = db.tabs.DRAW_WINNERS;
-  for (const [sheet, count] of [[output, recordIndexes.length], [ledger, winnerRows.length]]) {
-    resize_(requests, sheet, count + (sheet.gridProperties.frozenRowCount || 0) + 1, 0);
+  if (!removeSheet) {
+    resize_(requests, output, recordIndexes.length + (output.gridProperties.frozenRowCount || 0) + 1, 0);
+    deleteRows_(requests, output, recordIndexes);
   }
-  deleteRows_(requests, output, recordIndexes);
+  resize_(requests, ledger, winnerRows.length + (ledger.gridProperties.frozenRowCount || 0) + 1, 0);
   deleteRows_(requests, ledger, winnerRows);
   // Keep a zero-count record so retries cannot redraw a transaction canceled by a reset.
   requests.push(write_(db.tabs.DRAW_HISTORY.sheetId, 1, SYSTEM.DRAW_HISTORY.length - 1,
     db.history.map(draw => [draw.prizeId === prize.id ? 0 : draw.count])));
+  return requests;
+}
+
+function deletePrize_(db, input) {
+  if (typeof input.prizeId !== 'string' || !UUID.test(input.prizeId)) fail_('VALIDATION', 'Select an existing prize.');
+  const prize = db.prizes.find(item => item.id === input.prizeId);
+  if (!prize) return { deleted: true };
+  if (prize.archived) fail_('VALIDATION', 'Restore this archived prize before deleting it.');
+  const draws = db.history.filter(draw => draw.prizeId === prize.id && draw.count);
+  if ((draws.at(-1)?.tx || '') !== input.throughTx) {
+    fail_('CONFLICT', 'This prize changed. Refresh data and confirm the deletion again.');
+  }
+  const requests = prize.won ? resetPrizeRequests_(db, prize, true) : [];
+  requests.push({ deleteSheet: { sheetId: prize.sheetId } });
+  const prizes = db.tabs.PRIZES;
+  resize_(requests, prizes, (prizes.gridProperties.frozenRowCount || 0) + 2, 0);
+  deleteRows_(requests, prizes, [prize.index]);
+  const archiveRow = db.data.SETTINGS.findIndex(([name]) => name === ARCHIVED_PRIZE + prize.id);
+  if (archiveRow >= 3) deleteRows_(requests, db.tabs.SETTINGS, [archiveRow]);
   commit_(db, requests);
-  return { restored: winners.length };
+  return { deleted: true };
 }
 
 function receipt_(db, draw, reelNames) {

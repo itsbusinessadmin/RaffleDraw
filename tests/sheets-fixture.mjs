@@ -52,6 +52,8 @@ export function fixture(defaultRows = []) {
         const p = body.properties;
         if (next.has(p.sheetId) || sheetByName(next, p.title)) throw Error('Duplicate tab');
         next.set(p.sheetId, { properties: { ...p, index: next.size, sheetType: 'GRID' }, rows: [] });
+      } else if (type === 'deleteSheet') {
+        if (!next.delete(body.sheetId)) throw Error('Tab does not exist');
       } else if (type === 'updateSheetProperties') {
         const p = body.properties;
         const previous = next.get(p.sheetId).properties;

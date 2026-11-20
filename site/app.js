@@ -3,7 +3,6 @@ import { Reel, duration, HOLD } from './reel.js';
 
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat();
-const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const audience = new URLSearchParams(location.hash.slice(1)).get('projector');
 const isProjector = /^[0-9a-f-]{36}$/i.test(audience || '');
@@ -120,7 +119,10 @@ function startOperator() {
   let editingPrize = '';
   let resetRequest = null;
   let archiveUndo = null;
-  let limit = 30;
+  let selectingPrizes = false;
+  let bulkRequest = null;
+  const selectedPrizes = new Set();
+  const latestDraws = new Map();
   let run = null;
   let offeredDraw = null;
   let frame = 0;
@@ -220,7 +222,10 @@ function startOperator() {
     state = null;
     run = null;
     archiveUndo = null;
+    selectingPrizes = false;
+    selectedPrizes.clear();
     showMessage('archive-error');
+    showMessage('bulk-result');
     syncError = '';
     clearTimeout(advanceTimer);
     cancelAnimationFrame(frame);
@@ -257,22 +262,25 @@ function startOperator() {
     }
   }
 
-  function renderHistory() {
-    const query = $('search').value.trim().toLocaleLowerCase();
-    const history = state?.history || [];
-    const rows = query ? history.filter(item =>
-      [item.name, item.prizeName, item.id].some(value => String(value).toLocaleLowerCase().includes(query))) : history;
-    $('history').replaceChildren(...rows.slice(0, limit).map(item => {
-      const row = document.createElement('tr');
-      row.append(node('td', item.name), node('td', item.prizeName), node('td', date.format(new Date(item.at))));
-      return row;
+  function renderArchived() {
+    const prizes = state?.prizes.filter(prize => prize.archived) || [];
+    showMessage('archived-empty', prizes.length ? '' : state ? 'No archived prizes.' : 'Connect Google Sheets to view archived prizes.');
+    $('archived-list').replaceChildren(...prizes.map(prize => {
+      const item = document.createElement('li');
+      const restore = node('button', 'Restore');
+      restore.type = 'button';
+      restore.className = 'restore-prize';
+      restore.setAttribute('aria-label', 'Restore ' + prize.name);
+      restore.addEventListener('click', () => setPrizeArchived(prize, false));
+      item.append(node('span', prize.name), restore);
+      return item;
     }));
-    showMessage('history-empty', rows.length ? '' : query ? 'No matching winners.' : 'Committed winners will appear here.');
-    $('history-more').hidden = rows.length <= limit;
   }
 
   function renderDashboard() {
     const prizes = state?.prizes.filter(prize => !prize.archived) || [];
+    const availableIds = new Set(prizes.map(prize => prize.id));
+    for (const id of selectedPrizes) if (!availableIds.has(id)) selectedPrizes.delete(id);
     if (!prizes.some(prize => prize.id === selected && prize.remaining)) selected = prizes.find(prize => prize.remaining)?.id || '';
     const selector = $('prize-select');
     const options = prizes.map(({ id, name, remaining, won, limit }) => [id, name, !remaining, won, limit]);
@@ -292,8 +300,11 @@ function startOperator() {
     $('settings-open').disabled = !state || mutation;
     $('prize-add').disabled = !state || mutation;
     $('refresh').disabled = !token;
-    $('search').disabled = !state;
-    const latestDraws = new Map();
+    $('prizes-select-mode').setAttribute('aria-pressed', String(selectingPrizes));
+    say('prizes-select-mode', selectingPrizes ? 'Done' : 'Select');
+    $('bulk-prize-actions').hidden = !selectingPrizes;
+    $('prize-row-actions').hidden = selectingPrizes;
+    latestDraws.clear();
     for (const winner of state?.history || []) {
       if (!latestDraws.has(winner.prizeId)) latestDraws.set(winner.prizeId, winner.tx);
     }
@@ -322,7 +333,7 @@ function startOperator() {
         resetRequest = { prizeId: prize.id, throughTx };
         const winners = number.format(prize.won) + (prize.won === 1 ? ' winner' : ' winners');
         say('reset-warning', 'Resetting “' + prize.name + '” returns ' + winners +
-          ' to ALL IMS and removes their wins for this prize from Winner history. They can enter future draws again.');
+          ' to ALL IMS and clears their wins for this prize. They can enter future draws again.');
         formError($('reset-form'));
         $('reset-dialog').showModal();
         renderControls();
@@ -343,7 +354,24 @@ function startOperator() {
       status.className = prize.remaining ? 'prize-status' : 'prize-status is-complete';
       const statusCell = document.createElement('td');
       statusCell.append(status);
-      row.append(node('td', prize.name), awarded, node('td', number.format(prize.perDraw)),
+      const nameCell = node('td', prize.name);
+      if (selectingPrizes) {
+        const label = document.createElement('label');
+        label.className = 'prize-check';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = selectedPrizes.has(prize.id);
+        check.setAttribute('aria-label', 'Select ' + prize.name);
+        check.addEventListener('change', () => {
+          if (check.checked) selectedPrizes.add(prize.id);
+          else selectedPrizes.delete(prize.id);
+          renderBulkActions();
+        });
+        label.append(check, node('span', prize.name));
+        nameCell.replaceChildren(label);
+      }
+      actions.hidden = selectingPrizes;
+      row.append(nameCell, awarded, node('td', number.format(prize.perDraw)),
         node('td', number.format(prize.remaining)), statusCell, actions);
       return row;
     }));
@@ -356,7 +384,7 @@ function startOperator() {
     if (state?.invalid) warnings.push(number.format(state.invalid) + ' participant rows need a valid name. Review the name column in Settings.');
     if (state?.excluded) warnings.push(number.format(state.excluded) + ' previous winners are back in ALL IMS. Remove their re-imported rows before drawing.');
     showMessage('notice', warnings.join(' '));
-    renderHistory();
+    if ($('archived-dialog').open) renderArchived();
     renderControls();
   }
 
@@ -364,13 +392,22 @@ function startOperator() {
     return run && (run.phase === 'spin' || run.phase === 'hold');
   }
 
+  function renderBulkActions() {
+    const blocked = !selectedPrizes.size || mutation || !!active() || !!(token && pending());
+    say('selected-prize-count', number.format(selectedPrizes.size) + ' selected');
+    $('bulk-archive').disabled = blocked;
+    $('bulk-delete').disabled = blocked;
+    $('bulk-reset').disabled = blocked || ![...selectedPrizes].some(id => latestDraws.has(id));
+  }
+
   function renderControls() {
     const prizes = state?.prizes.filter(item => !item.archived) || [];
     const prize = prizes.find(item => item.id === selected);
     const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, state?.eligible || 0);
     const waiting = token && pending();
-    const confirming = $('disconnect-dialog').open || $('reset-dialog').open;
+    const confirming = $('disconnect-dialog').open || $('reset-dialog').open || $('bulk-dialog').open || $('archived-dialog').open;
     $('prize-select').disabled = !prizes.length || mutation || !!active();
+    $('prizes-select-mode').disabled = mutation || (!prizes.length && !selectingPrizes);
     $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting || !!state?.invalid || !!state?.excluded;
     if ($('draw').disabled) offeredDraw = null;
     else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
@@ -384,9 +421,11 @@ function startOperator() {
     for (const button of document.querySelectorAll('.reset-prize')) {
       button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
     }
-    for (const button of document.querySelectorAll('.archive-prize, #archive-undo')) {
+    for (const button of document.querySelectorAll('.archive-prize, .restore-prize, #archive-undo')) {
       button.disabled = mutation || !!active() || !!waiting;
     }
+    for (const check of document.querySelectorAll('.prize-check input')) check.disabled = mutation;
+    renderBulkActions();
     $('reveal-actions').hidden = !active();
     $('pause').disabled = !active() || (run.phase === 'hold' && run.advance === 'manual');
     $('skip').disabled = !active() || run.phase !== 'spin';
@@ -482,7 +521,8 @@ function startOperator() {
     if (!prize || !token || mutation || active() || pending()) return;
     mutation = true;
     refreshSequence++;
-    showMessage('archive-error');
+    const errorId = $('archived-dialog').open ? 'archived-error' : 'archive-error';
+    showMessage(errorId);
     renderControls();
     let changed = false;
     try {
@@ -500,15 +540,76 @@ function startOperator() {
     } catch (error) {
       const message = error.code === 'BAD_REQUEST' && error.message === 'Unknown action.'
         ? 'Deploy the updated Apps Script version to use prize archiving.' : error.message;
-      showMessage('archive-error', message);
+      showMessage(errorId, message);
     } finally {
       mutation = false;
       renderDashboard();
       if (document.activeElement === document.body) {
-        const target = changed && archived ? $('archive-undo') : $('archive-' + prize.id);
+        const target = $('archived-dialog').open ? $('archived-dialog').querySelector('[data-close]') :
+          changed && archived ? $('archive-undo') : $('archive-' + prize.id);
         target?.focus({ preventScroll: true });
       }
     }
+  }
+
+  function bulkTargets(action) {
+    return (state?.prizes || [])
+      .filter(prize => selectedPrizes.has(prize.id) && !prize.archived && (action !== 'resetPrize' || latestDraws.has(prize.id)))
+      .map(prize => ({ ...prize, throughTx: latestDraws.get(prize.id) || '' }));
+  }
+
+  function confirmBulk(action) {
+    const prizes = bulkTargets(action);
+    if (!prizes.length) return;
+    bulkRequest = { action, prizes };
+    const quantity = number.format(prizes.length) + (prizes.length === 1 ? ' prize' : ' prizes');
+    const deleting = action === 'deletePrize';
+    say('bulk-heading', (deleting ? 'Delete ' : 'Reset ') + quantity + '?');
+    say('bulk-warning', deleting
+      ? 'This permanently deletes the selected prize worksheets and any remaining contents. Winners from these prizes return to ALL IMS and can enter future draws.'
+      : 'This clears the wins for the selected prizes and returns their winners to ALL IMS. They can enter future draws again.');
+    say('bulk-confirm', deleting ? 'Delete prizes' : 'Reset prizes');
+    $('bulk-dialog').showModal();
+    renderControls();
+  }
+
+  async function runBulk(action, prizes) {
+    if (!prizes.length || !token || mutation || active() || pending()) return;
+    mutation = true;
+    refreshSequence++;
+    showMessage('archive-error');
+    showMessage('bulk-result', 'Updating ' + number.format(prizes.length) + ' selected ' + (prizes.length === 1 ? 'prize…' : 'prizes…'));
+    if ($('bulk-dialog').open) $('bulk-dialog').close();
+    renderControls();
+    const failures = [];
+    try {
+      for (const prize of prizes) {
+        try {
+          await api(action, { prizeId: prize.id, throughTx: prize.throughTx, ...(action === 'archivePrize' && { archived: true }) });
+          const current = state?.prizes.find(item => item.id === prize.id);
+          if (current && action === 'archivePrize') current.archived = true;
+          if (current && action === 'deletePrize') state.prizes = state.prizes.filter(item => item.id !== prize.id);
+          if (run?.receipt.prizeId === prize.id) {
+            run = null;
+            renderResults('operator-results', null);
+          }
+          selectedPrizes.delete(prize.id);
+        } catch (error) {
+          const message = error.code === 'BAD_REQUEST' && error.message === 'Unknown action.'
+            ? 'Deploy the updated Apps Script version to use this action.' : error.message;
+          failures.push(prize.name + ' — ' + message);
+        }
+      }
+      await refresh(true);
+    } finally {
+      mutation = false;
+      renderDashboard();
+    }
+    const successes = prizes.length - failures.length;
+    const verb = action === 'archivePrize' ? 'Archived' : action === 'resetPrize' ? 'Reset' : 'Deleted';
+    showMessage('bulk-result', successes ? verb + ' ' + number.format(successes) + (successes === 1 ? ' prize.' : ' prizes.') : '');
+    showMessage('archive-error', failures.length ? failures.slice(0, 3).join(' ') +
+      (failures.length > 3 ? ' ' + number.format(failures.length - 3) + ' more failed.' : '') : '');
   }
 
   function openPrize(prize) {
@@ -557,7 +658,7 @@ function startOperator() {
   for (const button of document.querySelectorAll('[data-close]')) {
     button.addEventListener('click', () => button.closest('dialog').close());
   }
-  for (const dialog of [$('disconnect-dialog'), $('reset-dialog')]) {
+  for (const dialog of [$('disconnect-dialog'), $('reset-dialog'), $('bulk-dialog'), $('archived-dialog')]) {
     dialog.addEventListener('close', renderControls);
   }
   $('reset-dialog').addEventListener('cancel', event => {
@@ -627,6 +728,25 @@ function startOperator() {
     saveForm(event.currentTarget, 'settings', { eventName: $('event-name').value, nameHeader: $('name-header').value });
   });
   $('archive-undo').addEventListener('click', () => setPrizeArchived(archiveUndo, false));
+  $('archived-open').addEventListener('click', () => {
+    showMessage('archived-error');
+    renderArchived();
+    $('archived-dialog').showModal();
+    renderControls();
+  });
+  $('prizes-select-mode').addEventListener('click', () => {
+    selectingPrizes = !selectingPrizes;
+    selectedPrizes.clear();
+    showMessage('bulk-result');
+    if (selectingPrizes && $('prizes-panel').hidden) $('prizes-toggle').click();
+    renderDashboard();
+  });
+  $('bulk-archive').addEventListener('click', () => runBulk('archivePrize', bulkTargets('archivePrize')));
+  $('bulk-reset').addEventListener('click', () => confirmBulk('resetPrize'));
+  $('bulk-delete').addEventListener('click', () => confirmBulk('deletePrize'));
+  $('bulk-confirm').addEventListener('click', () => {
+    if (bulkRequest) runBulk(bulkRequest.action, bulkRequest.prizes);
+  });
   $('prize-add').addEventListener('click', () => openPrize());
   $('prizes-toggle').addEventListener('click', event => {
     const button = event.currentTarget;
@@ -683,8 +803,6 @@ function startOperator() {
     Object.assign(run, { phase: 'summary', index: run.receipt.count - 1, revealed: run.receipt.count, pausedAt: null });
     updateReveal();
   });
-  $('search').addEventListener('input', () => { limit = 30; renderHistory(); });
-  $('history-more').addEventListener('click', () => { limit += 30; renderHistory(); });
   $('refresh').addEventListener('click', () => { showMessage('issue'); refresh(); });
   $('projector-open').addEventListener('click', () => {
     const url = new URL(location.href);

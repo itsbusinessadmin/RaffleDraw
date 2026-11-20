@@ -23,7 +23,7 @@
     <nav class="section-nav" aria-label="Dashboard sections">
       <a href="#draw-section" aria-current="location">Live draw</a>
       <a href="#prizes-section">Prizes</a>
-      <a href="#history-section">Winner history</a>
+      <button id="archived-open" type="button" class="quiet" aria-haspopup="dialog">Archived</button>
     </nav>
     <div class="dashboard">
       <div class="intro">
@@ -74,6 +74,7 @@
           <h2 id="prizes-heading">Prizes</h2>
           <div class="actions">
             <button id="prize-add" type="button" disabled>Add prize</button>
+            <button id="prizes-select-mode" type="button" aria-pressed="false" disabled>Select</button>
             <button id="prizes-toggle" type="button" aria-label="Collapse prize list" aria-controls="prizes-panel" aria-expanded="true" title="Collapse prize list"></button>
           </div>
         </div>
@@ -81,19 +82,22 @@
           <p id="archive-message" role="status"></p>
           <button id="archive-undo" class="quiet" type="button">Undo</button>
         </div>
+        <p id="bulk-result" class="notice" role="status" hidden></p>
         <p id="archive-error" class="notice error" role="alert" hidden></p>
-        <div class="table-wrap" id="prizes-panel" role="region" aria-label="Prizes table" tabindex="0">
-          <table><thead><tr><th scope="col">Prize</th><th scope="col">Awarded</th><th scope="col">Per draw</th><th scope="col">Remaining</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody id="prizes"></tbody></table>
-          <p class="empty" id="prize-empty">Prizes will appear after you connect.</p>
+        <div id="prizes-panel">
+          <div class="bulk-actions" id="bulk-prize-actions" hidden>
+            <p id="selected-prize-count" role="status">0 selected</p>
+            <div class="actions">
+              <button id="bulk-archive" type="button">Archive</button>
+              <button id="bulk-reset" type="button">Reset</button>
+              <button id="bulk-delete" type="button" class="danger">Delete</button>
+            </div>
+          </div>
+          <div class="table-wrap" role="region" aria-label="Prizes table" tabindex="0">
+            <table><thead><tr><th scope="col">Prize</th><th scope="col">Awarded</th><th scope="col">Per draw</th><th scope="col">Remaining</th><th scope="col">Status</th><th scope="col" id="prize-row-actions">Actions</th></tr></thead><tbody id="prizes"></tbody></table>
+            <p class="empty" id="prize-empty">Prizes will appear after you connect.</p>
+          </div>
         </div>
-      </section>
-      <section class="dashboard-section" id="history-section" aria-labelledby="history-heading">
-        <div class="section-head"><h2 id="history-heading">Winner history</h2><input id="search" type="search" aria-label="Search winners or prizes" placeholder="Search history" disabled></div>
-        <div class="table-wrap" role="region" aria-label="Winner history table" tabindex="0">
-          <table><thead><tr><th scope="col">Winner</th><th scope="col">Prize</th><th scope="col">Draw date</th></tr></thead><tbody id="history"></tbody></table>
-          <p class="empty" id="history-empty">Committed winners will appear here.</p>
-        </div>
-        <button id="history-more" type="button" hidden>Show more</button>
       </section>
       <footer><span id="updated">Google Sheets</span><button id="refresh" class="quiet" type="button" disabled>Refresh data</button></footer>
     </div>
@@ -112,6 +116,21 @@
     </div>
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
   </main>
+  <dialog id="archived-dialog" aria-labelledby="archived-heading">
+    <h2 id="archived-heading">Archived prizes</h2>
+    <p id="archived-empty" class="dialog-copy"></p>
+    <p id="archived-error" class="error" role="alert" hidden></p>
+    <ul id="archived-list" class="archived-list"></ul>
+    <div class="dialog-actions"><button type="button" data-close autofocus>Close</button></div>
+  </dialog>
+  <dialog id="bulk-dialog" aria-labelledby="bulk-heading" aria-describedby="bulk-warning">
+    <h2 id="bulk-heading">Confirm prize changes</h2>
+    <p id="bulk-warning" class="dialog-copy"></p>
+    <div class="dialog-actions">
+      <button type="button" data-close autofocus>Cancel</button>
+      <button id="bulk-confirm" class="danger" type="button">Confirm</button>
+    </div>
+  </dialog>
   <dialog id="disconnect-dialog" aria-labelledby="disconnect-heading" aria-describedby="disconnect-warning">
     <h2 id="disconnect-heading">Disconnect from Google Sheets?</h2>
     <p class="dialog-copy" id="disconnect-warning">This ends the current dashboard session and clears the projector. Saved winners stay in Google Sheets. You’ll need the administrator key to reconnect.</p>

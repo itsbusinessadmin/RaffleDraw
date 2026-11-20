@@ -263,6 +263,35 @@ test('archiving a prize preserves its records and blocks new draws until restore
   assert.equal(ok(app.request('draw', second)).count, 1);
 });
 
+test('deleting a prize atomically restores its winners and rejects stale confirmations', () => {
+  const app = fixture();
+  app.initialize();
+  const header = ['Name', 'Participant ID', 'Team'];
+  app.loadRoster([header, ['One', '001', 'Blue'], ['Two', '002', 'Red']]);
+  const name = 'Grand Prize';
+  const prizeId = ok(app.request('prize', { name, limit: 1, perDraw: 1 })).id;
+  const emptyId = ok(app.request('prize', { name: 'Empty Prize', limit: 1, perDraw: 1 })).id;
+  const throughTx = randomUUID();
+  ok(app.request('draw', { tx: throughTx, prizeId }));
+  const roster = app.data('ALL IMS');
+  const prize = app.data(name);
+  const deletion = { prizeId, throughTx };
+  assert.equal(app.request('deletePrize', { ...deletion, throughTx: '' }).code, 'CONFLICT');
+  app.fail('before');
+  assert.equal(app.request('deletePrize', deletion).code, 'BACKEND_ERROR');
+  assert.deepEqual(app.data('ALL IMS'), roster);
+  assert.deepEqual(app.data(name), prize);
+  app.fail('after');
+  assert.equal(app.request('deletePrize', deletion).code, 'BACKEND_ERROR');
+  assert.equal(ok(app.request('deletePrize', deletion)).deleted, true);
+  assert.deepEqual(app.data('ALL IMS'), [...roster, ...prize.slice(1)]);
+  assert.equal(app.names().includes(name), false);
+  assert.equal(ok(app.request('state')).won, 0);
+  assert.equal(app.request('draw', { tx: throughTx, prizeId }).code, 'CONFLICT');
+  assert.equal(ok(app.request('deletePrize', { prizeId: emptyId, throughTx: '' })).deleted, true);
+  assert.equal(ok(app.request('state')).prizes.length, 0);
+});
+
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {
   const steps = 52;
   const sequence = Array.from({ length: 11 }, (_, i) => positionAt(i / 10, steps));
