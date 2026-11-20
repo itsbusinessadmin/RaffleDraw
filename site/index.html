@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src https://script.google.com https://script.googleusercontent.com https://*.workers.dev; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src https://script.google.com https://script.googleusercontent.com https://*.workers.dev; form-action 'none'">
   <title>Raffle Draw</title>
   <link rel="stylesheet" href="./style.css">
   <script type="module" src="./app.js"></script>
@@ -103,13 +103,24 @@
     <header class="projector-head">
       <div><p id="projector-event">Raffle Draw</p><h1 id="projector-prize">Live draw</h1></div>
       <button id="fullscreen" type="button">Enter fullscreen</button>
-      <button id="projector-draw" type="button" disabled>Draw</button>
     </header>
+    <div class="projector-tools">
+      <button id="projector-toggle" type="button" aria-label="Draw controls" aria-expanded="false" aria-controls="projector-controls" title="Draw controls"></button>
+      <section class="projector-controls" id="projector-controls" aria-labelledby="projector-controls-title" hidden>
+        <h2 id="projector-controls-title">Draw controls</h2>
+        <label for="projector-advance">Advance</label>
+        <select id="projector-advance" disabled>
+          <option value="auto">Automatic</option>
+          <option value="manual">Manual</option>
+        </select>
+        <button id="projector-draw" type="button" disabled>Draw</button>
+        <button id="projector-next" type="button" hidden>Next winner</button>
+      </section>
+    </div>
     <div class="projector-main" id="projector-stage">
-      <p id="projector-position">Waiting for operator</p>
-      <div class="ticket-scatter" aria-hidden="true"></div>
+      <p id="projector-position" hidden></p>
       <div class="reel" aria-hidden="true"></div>
-      <p id="projector-caption" aria-live="polite">The draw will appear here.</p>
+      <p id="projector-caption" aria-live="polite"></p>
     </div>
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
   </main>

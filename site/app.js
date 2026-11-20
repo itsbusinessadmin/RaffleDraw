@@ -41,6 +41,10 @@ if (isProjector) {
   const reel = new Reel($('projector-stage').querySelector('.reel'));
   const projector = $('projector');
   const drawButton = $('projector-draw');
+  const nextButton = $('projector-next');
+  const advanceSelect = $('projector-advance');
+  const controls = $('projector-controls');
+  const toggle = $('projector-toggle');
   let live = null;
   let frame = 0;
   $('operator').hidden = true;
@@ -60,16 +64,23 @@ if (isProjector) {
 
   function render() {
     cancelAnimationFrame(frame);
-    const { eventName, prizeName, run } = live;
+    const { eventName, prizeName, run, advance, advanceEditable, drawTx } = live;
+    drawButton.disabled = !drawTx;
+    advanceSelect.disabled = !advanceEditable;
+    advanceSelect.value = advance || 'auto';
+    const manual = run?.advance === 'manual' && (run.phase === 'spin' || run.phase === 'hold');
+    nextButton.hidden = !manual;
+    nextButton.disabled = !manual || run.phase !== 'hold';
+    if (manual) say('projector-next', run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner');
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
     if (!run) {
       reel.idle('Ready for the draw');
-      say('projector-position', 'Standby');
-      say('projector-caption', 'The draw will appear here.');
+      showMessage('projector-position');
+      say('projector-caption', '');
     } else {
       const done = run.phase === 'complete' || run.phase === 'summary';
-      say('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
+      showMessage('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
       say('projector-caption', done ? run.revealed + ' winners revealed' :
         run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
       drawFrame();
@@ -80,7 +91,6 @@ if (isProjector) {
   channel.addEventListener('message', event => {
     if (event.data?.type !== 'state') return;
     live = event.data;
-    drawButton.disabled = !live.drawTx;
     render();
   });
   channel.postMessage({ type: 'ready' });
@@ -88,10 +98,29 @@ if (isProjector) {
     try { await projector.requestFullscreen(); }
     catch (_) { say('fullscreen', 'Fullscreen unavailable'); }
   });
+  function setControls(open) {
+    controls.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+  }
+  toggle.addEventListener('click', () => {
+    if (document.fullscreenElement === projector) setControls(controls.hidden);
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement !== projector) setControls(false);
+  });
+  advanceSelect.addEventListener('change', () => {
+    if (document.fullscreenElement !== projector || advanceSelect.disabled) return;
+    channel.postMessage({ type: 'advance', value: advanceSelect.value });
+  });
   drawButton.addEventListener('click', () => {
     if (document.fullscreenElement !== projector || drawButton.disabled) return;
     drawButton.disabled = true;
     channel.postMessage({ type: 'draw', tx: live.drawTx });
+  });
+  nextButton.addEventListener('click', () => {
+    if (document.fullscreenElement !== projector || nextButton.disabled) return;
+    nextButton.disabled = true;
+    channel.postMessage({ type: 'next', tx: live.run.receipt.tx, index: live.run.index });
   });
 } else {
   startOperator();
@@ -197,7 +226,8 @@ function startOperator() {
     channel.postMessage({
       type: 'state', eventName: state?.eventName || 'Raffle Draw',
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
-      drawTx: offeredDraw?.tx, run
+      drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
+      advanceEditable: !!state && !!token && !active() && !mutation
     });
   }
 
@@ -206,6 +236,17 @@ function startOperator() {
     if (message?.type === 'ready') publish();
     if (message?.type === 'draw') {
       if (offeredDraw && message.tx === offeredDraw.tx) startDraw();
+      else publish();
+    }
+    if (message?.type === 'advance') {
+      if (state && token && !active() && !mutation && ['auto', 'manual'].includes(message.value)) {
+        $('advance').value = message.value;
+      }
+      publish();
+    }
+    if (message?.type === 'next') {
+      if (run?.advance === 'manual' && run.phase === 'hold' &&
+          message.tx === run.receipt.tx && message.index === run.index) next();
       else publish();
     }
   });
@@ -849,6 +890,7 @@ function startOperator() {
     renderControls();
   });
   $('draw').addEventListener('click', startDraw);
+  $('advance').addEventListener('change', publish);
   $('retry').addEventListener('click', () => commitDraw(pending()));
   $('pause').addEventListener('click', () => {
     if (!active()) return;

@@ -5,6 +5,13 @@
   font-weight: 400 800;
   font-display: swap;
 }
+@font-face {
+  font-family: "Cormorant Garamond";
+  src: url("./fonts/cormorant-garamond.woff") format("woff");
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+}
 :root {
   color-scheme: light;
   --ink: #251b31;
@@ -897,69 +904,157 @@ dialog .error {
   margin-top: 19px;
 }
 #projector {
+  --stage: #110d10;
+  --stage-muted: #e7d8bb;
+  --ticket-gold: #f5d48c;
+  --projector-line: #c6a76b72;
+  --projector-ivory: #fff1d4;
+  --row: clamp(72px, 11vh, 132px);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  position: relative;
+  isolation: isolate;
   min-height: 100dvh;
   background: var(--stage);
-  color: #fff;
-  padding: clamp(20px, 4vw, 65px);
-  --row: clamp(76px, 12vh, 160px);
+  color: var(--projector-ivory);
+  padding: clamp(24px, 4vw, 64px) clamp(30px, 6vw, 96px);
+  scrollbar-color: #9f7946 var(--stage);
+}
+#projector::before,
+#projector::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+}
+#projector::before {
+  inset: 0;
+  background:
+    linear-gradient(180deg, #110d1029, transparent 45%),
+    url("./images/masquerade-stage.webp") center bottom / cover no-repeat;
+}
+#projector::after {
+  inset: clamp(10px, 1.6vw, 26px);
+  border: 1px solid var(--projector-line);
+}
+#projector ::selection {
+  color: var(--stage);
+  background: var(--ticket-gold);
 }
 .presentation {
-  background: var(--stage);
+  background: #110d10;
 }
 .presentation .masthead {
   display: none;
 }
 .projector-head {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 10px;
+  position: relative;
+  text-align: center;
 }
-.projector-head > div {
+.projector-head h1 {
+  max-inline-size: 28ch;
+  margin: 0.27em auto 0;
+  color: var(--projector-ivory);
+  font: 600 clamp(2.125rem, 4.65vw, 5rem) / 0.98 "Cormorant Garamond", Georgia, serif;
+  font-variant-numeric: lining-nums;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+#projector-event {
+  color: var(--ticket-gold);
+  font-size: clamp(0.75rem, 1.1vw, 1rem);
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+#projector button,
+#projector select {
+  color: var(--projector-ivory);
+  background-color: #26171c;
+  border-color: var(--projector-line);
+}
+#projector button:hover:not(:disabled) {
+  background-color: #4c2530;
+  border-color: #c6a76b;
+}
+#projector button:disabled,
+#projector select:disabled {
+  color: var(--stage-muted);
+  opacity: 0.65;
+}
+#projector button:focus-visible,
+#projector select:focus-visible {
+  outline-color: var(--ticket-gold);
+}
+#fullscreen {
+  margin-top: 14px;
+}
+.projector-main {
+  --ticket-width: 860px;
+  --ticket-text-width: 645px;
+  display: grid;
+  grid-template-rows: minmax(1.5rem, auto) auto minmax(1.5rem, auto);
+  align-self: center;
+  width: min(100%, 1200px);
   min-width: 0;
+  margin-inline: auto;
+  padding-block: 10px;
+  text-align: center;
 }
-.projector-head button {
-  flex-shrink: 0;
-  background: #38245a;
-  border-color: #ba9aee73;
-  color: #f2e8ff;
-}
-.projector-head button:hover:not(:disabled) {
-  background: #543882;
-}
-.projector-head button:focus-visible {
-  outline-color: #c5a2ff;
-}
-.projector-head p,
 #projector-position,
 #projector-caption {
   color: var(--stage-muted);
-  font-size: clamp(1rem, 2.3vw, 1.6rem);
+  font-size: clamp(0.9rem, 1.55vw, 1.35rem);
   overflow-wrap: anywhere;
 }
-.projector-head h1 {
-  font-size: clamp(2rem, 6vw, 5rem);
-  margin-top: 5px;
+#projector-position {
+  grid-row: 1;
 }
-.projector-main {
-  --ticket-width: 960px;
-  --ticket-text-width: 735px;
-  max-width: 1300px;
-  margin: clamp(18px, 5vh, 72px) auto 0;
-  padding-block: 16px;
-  text-align: center;
+#projector-caption {
+  grid-row: 3;
 }
-.projector-main .reel-row,
+.projector-main .reel {
+  grid-row: 2;
+  height: calc(2.8 * var(--row));
+}
+#projector .reel::before {
+  --ticket-fill: #e8ca8d;
+  --ticket-perforation: #5d403a73;
+}
+#projector .reel[data-phase="spin"]::before {
+  --ticket-fill: #662d3d;
+  --ticket-perforation: #f3d7a58c;
+}
+#projector .reel:is([data-phase="landed"], [data-phase="summary"])::before {
+  --ticket-fill: var(--ticket-gold);
+}
+#projector .reel::after {
+  display: none;
+}
+#projector .reel-row,
 #projector .reel-placeholder {
-  font-size: clamp(1.65rem, 5.1vw, 4.75rem);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(1.65rem, 4.55vw, 4.75rem);
+  font-weight: 700;
 }
-.projector-main .reel-row.long {
-  font-size: clamp(1rem, 3.2vw, 2.75rem);
+#projector .reel-placeholder,
+#projector .reel[data-phase="landed"] .reel-row[data-center="true"] {
+  color: #311c23;
+}
+#projector .reel[data-phase="spin"] .reel-row:not([data-center="true"]) {
+  opacity: 0.42;
+}
+#projector .reel-row.long {
+  font-size: clamp(1rem, 3.2vw, 2.8rem);
 }
 #projector-results {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
-  font-size: clamp(1rem, 2.2vw, 1.5rem);
-  margin-top: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
+  max-width: 900px;
+  width: 100%;
+  margin: 14px auto 0;
+  color: var(--projector-ivory);
+  font-size: clamp(1rem, 1.7vw, 1.3rem);
 }
 #projector-results li::marker {
   color: var(--ticket-gold);
@@ -967,28 +1062,88 @@ dialog .error {
 #projector:fullscreen {
   overflow: auto;
 }
-#projector:fullscreen #fullscreen {
+#projector:fullscreen #fullscreen,
+.projector-tools {
   display: none;
 }
-#projector-draw {
-  display: none;
+#projector:fullscreen .projector-tools {
+  display: flex;
+  align-items: center;
+  position: fixed;
+  z-index: 3;
+  inset-inline-start: 6px;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
 }
-#projector:fullscreen #projector-draw {
-  display: inline-block;
-  min-width: 88px;
+#projector-toggle {
+  display: grid;
+  place-items: center;
+  width: 38px;
   min-height: 44px;
+  padding: 0;
 }
-#projector-draw:enabled {
-  background: #e1d3fb;
-  border-color: #e1d3fb;
-  color: var(--stage);
+#projector-toggle::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: solid var(--ticket-gold);
+  border-width: 2px 2px 0 0;
+  transform: translateX(-1px) rotate(45deg);
 }
-#projector-draw:enabled:hover {
-  background: #f2e8ff;
-  border-color: #f2e8ff;
+#projector-toggle[aria-expanded="true"]::before {
+  transform: translateX(1px) rotate(-135deg);
 }
-#projector-draw:disabled {
+.projector-controls {
+  display: grid;
+  gap: 8px;
+  width: min(230px, calc(100vw - 62px));
+  margin-inline-start: 6px;
+  padding: 16px;
+  border: 1px solid var(--projector-line);
+  border-radius: 12px;
+  background: #201317;
+}
+.projector-controls h2 {
+  margin-bottom: 7px;
+  font-size: 1.05rem;
+}
+.projector-controls label {
   color: var(--stage-muted);
+  margin: 0;
+}
+#projector-advance {
+  color-scheme: dark;
+  background-image: none;
+  appearance: auto;
+  padding-inline: 9px;
+}
+#projector :is(#projector-draw, #projector-next):enabled {
+  background: var(--ticket-gold);
+  border-color: var(--ticket-gold);
+  color: #311c23;
+}
+#projector :is(#projector-draw, #projector-next):enabled:hover {
+  background: #ffe3a7;
+  border-color: #ffe3a7;
+}
+@media (max-width: 680px) {
+  #projector {
+    padding-inline: 23px;
+  }
+  #projector::before {
+    background-image:
+      linear-gradient(180deg, var(--stage), transparent 42%),
+      url("./images/masquerade-stage.webp");
+    background-position: center bottom;
+    background-size: 100% calc(100vw * 0.5625), 100% auto;
+    background-repeat: no-repeat;
+  }
+  #projector:fullscreen .projector-tools {
+    align-items: end;
+    inset-block-start: auto;
+    inset-block-end: 18px;
+    transform: none;
+  }
 }
 @media (max-width: 1000px) {
   .shell {
