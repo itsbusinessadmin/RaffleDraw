@@ -204,6 +204,11 @@
         <div><label for="prize-limit">Total winners</label><input id="prize-limit" type="number" min="1" max="100000" required></div>
         <div><label for="prize-count">Winners per draw</label><input id="prize-count" type="number" min="1" max="1000" required></div>
       </div>
+      <label class="prize-check" for="prize-all-participants">
+        <input id="prize-all-participants" type="checkbox" aria-describedby="prize-participants-hint">
+        <span>All participants</span>
+      </label>
+      <p class="hint" id="prize-participants-hint">Include earlier winners. Each person can win this prize once.</p>
       <p class="error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save prize</button></div>
     </form>

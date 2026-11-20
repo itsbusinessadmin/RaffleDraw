@@ -3,6 +3,7 @@ const ROSTER = 'ALL IMS';
 const ID_HEADER = 'Participant ID';
 const GUARD = 'RAFFLE_WRITE_VERSION';
 const ARCHIVED_PRIZE = 'archivedPrize:';
+const ALL_PARTICIPANTS = 'allParticipants:';
 const SYSTEM = {
   SETTINGS: ['key', 'value'],
   PRIZES: ['prizeId', 'sheetId', 'name', 'limit', 'perDraw', 'createdAt'],
@@ -282,17 +283,22 @@ function database_(id) {
   if (new Set(usedHeaders).size !== usedHeaders.length) fail_('INTEGRITY', 'ALL IMS has duplicate column headers.');
   const winnerList = data.DRAW_WINNERS.slice(1).map(([tx, prizeId, id, name, position]) =>
     ({ tx, prizeId, id: String(id ?? '').trim(), name, position }));
-  const winnerIds = new Set(winnerList.map(winner => winner.id));
-  const winnerCounts = new Map();
+  const winsByParticipant = new Map();
+  const winnersByPrize = new Map();
   const winnersByDraw = new Map();
   for (const winner of winnerList) {
-    winnerCounts.set(winner.prizeId, (winnerCounts.get(winner.prizeId) || 0) + 1);
+    if (!winsByParticipant.has(winner.id)) winsByParticipant.set(winner.id, []);
+    winsByParticipant.get(winner.id).push(winner);
+    if (!winnersByPrize.has(winner.prizeId)) winnersByPrize.set(winner.prizeId, new Set());
+    const prizeWinners = winnersByPrize.get(winner.prizeId);
+    if (!winner.id || prizeWinners.has(winner.id)) fail_('INTEGRITY', 'A prize has a missing or duplicate winner ID.');
+    prizeWinners.add(winner.id);
     if (!winnersByDraw.has(winner.tx)) winnersByDraw.set(winner.tx, []);
     winnersByDraw.get(winner.tx).push(winner);
   }
   const history = data.DRAW_HISTORY.slice(1).map(([tx, prizeId, prizeName, eventName, at, count]) =>
     ({ tx, prizeId, prizeName, eventName, at, count }));
-  if (winnerList.length !== winnerIds.size || new Set(history.map(draw => draw.tx)).size !== history.length ||
+  if (new Set(history.map(draw => draw.tx)).size !== history.length ||
       history.reduce((total, draw) => total + draw.count, 0) !== winnerList.length ||
       history.some(draw => {
         const winners = winnersByDraw.get(draw.tx) || [];
@@ -309,7 +315,7 @@ function database_(id) {
     const participantId = String(values[idColumn] ?? '').trim();
     if (participantId && activeIds.has(participantId)) fail_('INTEGRITY', 'ALL IMS contains a duplicate participant ID.');
     if (participantId) activeIds.add(participantId);
-    if (winnerIds.has(participantId)) { excluded++; return; }
+    if (winsByParticipant.has(participantId)) { excluded++; return; }
     const name = nameHeader && nameColumn >= 0 ? String(values[nameColumn] ?? '').trim() : '';
     if (!name || name.length > 500) { invalid++; return; }
     eligible.push({ row: offset + 1, id: participantId, name });
@@ -317,18 +323,21 @@ function database_(id) {
   const settings = new Map(data.SETTINGS.slice(3));
   const prizes = data.PRIZES.slice(1).map(([id, sheetId, name, limit, perDraw, at], index) => {
     const sheet = tabs[name];
-    const won = winnerCounts.get(id) || 0;
+    const won = winnersByPrize.get(id)?.size || 0;
     if (!sheet || sheet.sheetId !== sheetId || !Number.isSafeInteger(limit) || !Number.isSafeInteger(perDraw) ||
         perDraw < 1 || perDraw > limit || won > limit) fail_('INTEGRITY', 'A prize record or worksheet has changed outside the app.');
     const archived = settings.get(ARCHIVED_PRIZE + id) === true;
-    return { id, sheetId, name, limit, perDraw, at, won, remaining: limit - won, archived, index: index + 1 };
+    const allParticipants = settings.get(ALL_PARTICIPANTS + id) === true;
+    const eligibleCount = eligible.length + (allParticipants ? winsByParticipant.size - won : 0);
+    return { id, sheetId, name, limit, perDraw, at, won, remaining: limit - won, archived, allParticipants,
+      eligible: eligibleCount, index: index + 1 };
   });
   if (new Set(prizes.map(prize => prize.id)).size !== prizes.length ||
-      [...winnerCounts.keys()].some(id => !prizes.some(prize => prize.id === id))) {
+      [...winnersByPrize.keys()].some(id => !prizes.some(prize => prize.id === id))) {
     fail_('INTEGRITY', 'Prize identifiers and the winner ledger disagree.');
   }
   return { id, tabs, guard, source, bookSheets: book.sheets, data, headers, rawHeaders, nameHeader, idColumn, eligible, invalid, excluded, history,
-    winnersByDraw, prizes, winnerList, winnerIds, activeIds, eventName: String(data.SETTINGS[1][1] || 'Raffle Draw') };
+    winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds, eventName: String(data.SETTINGS[1][1] || 'Raffle Draw') };
 }
 
 function dispatch_(cfg, input) {
@@ -349,7 +358,7 @@ function dispatch_(cfg, input) {
     }
     case 'resetPrize': {
       const result = resetPrize_(db, input);
-      if (result.restored) clearPrizePresentation_(cfg, input.prizeId);
+      if (result.reset) clearPrizePresentation_(cfg, input.prizeId);
       return result;
     }
     case 'draw': return draw_(db, cfg.random, input);
@@ -367,8 +376,8 @@ function state_(db) {
   const byTx = new Map(db.history.map(draw => [draw.tx, draw]));
   return {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
-    presentationSync: true,
-    total: db.eligible.length + db.invalid + db.winnerList.length, eligible: db.eligible.length, won: db.winnerList.length,
+    presentationSync: true, allParticipantsMode: true,
+    total: db.eligible.length + db.invalid + db.winsByParticipant.size, eligible: db.eligible.length, won: db.winsByParticipant.size,
     invalid: db.invalid, excluded: db.excluded, prizes: db.prizes, lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {
       const draw = byTx.get(winner.tx);
@@ -400,6 +409,9 @@ function savePrize_(db, input) {
     fail_('VALIDATION', 'A worksheet with that name already exists.');
   }
   const { limit, perDraw } = input;
+  if (input.allParticipants !== undefined && typeof input.allParticipants !== 'boolean') {
+    fail_('VALIDATION', 'Choose whether to include all participants.');
+  }
   if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(perDraw) || limit < 1 || limit > 100000 ||
       perDraw < 1 || perDraw > Math.min(1000, limit) || limit < (current?.won || 0)) {
     fail_('VALIDATION', 'Check the winner limits. Each draw can award up to 1,000 winners and the prize limit must cover existing wins.');
@@ -418,6 +430,9 @@ function savePrize_(db, input) {
   const row = current?.index ?? db.data.PRIZES.length;
   resize_(requests, ledger, row + 1, SYSTEM.PRIZES.length);
   requests.push(write_(ledger.sheetId, row, 0, [[prizeId, sheetId, name, limit, perDraw, current?.at || new Date().toISOString()]]));
+  if (input.allParticipants !== undefined && input.allParticipants !== (current?.allParticipants ?? false)) {
+    writePrizeSetting_(db, requests, ALL_PARTICIPANTS + prizeId, input.allParticipants);
+  }
   commit_(db, requests);
   return { id: prizeId };
 }
@@ -434,16 +449,19 @@ function archivePrize_(db, input) {
   if (typeof archived !== 'boolean') fail_('VALIDATION', 'Choose whether to archive or restore the prize.');
   if (prize.archived === archived) return { archived };
 
+  const requests = [];
+  writePrizeSetting_(db, requests, ARCHIVED_PRIZE + prize.id, archived);
+  commit_(db, requests);
+  return { archived };
+}
+
+function writePrizeSetting_(db, requests, key, value) {
   const settings = db.tabs.SETTINGS;
-  const key = ARCHIVED_PRIZE + prize.id;
   const rows = db.data.SETTINGS;
   const existing = rows.findIndex(([name]) => name === key);
   const index = existing < 0 ? rows.length : existing;
-  const requests = [];
   resize_(requests, settings, index + 1, SYSTEM.SETTINGS.length);
-  requests.push(write_(settings.sheetId, index, 0, [[key, archived]]));
-  commit_(db, requests);
-  return { archived };
+  requests.push(write_(settings.sheetId, index, 0, [[key, value]]));
 }
 
 function deleteRows_(requests, sheet, indexes) {
@@ -467,9 +485,9 @@ function resetPrize_(db, input) {
   if (prize.archived) fail_('VALIDATION', 'Restore this archived prize before resetting it.');
   const draws = db.history.filter(draw => draw.prizeId === prize.id && draw.count);
   if (draws.at(-1)?.tx !== throughTx) fail_('CONFLICT', 'This prize changed. Refresh data and confirm the reset again.');
-  const requests = resetPrizeRequests_(db, prize);
+  const { requests, restored } = resetPrizeRequests_(db, prize);
   commit_(db, requests);
-  return { restored: prize.won };
+  return { restored, reset: true };
 }
 
 function resetPrizeRequests_(db, prize, removeSheet = false) {
@@ -512,7 +530,9 @@ function resetPrizeRequests_(db, prize, removeSheet = false) {
     !winner.id || typeof winner.name !== 'string' || !winner.name.trim() || winner.name.length > 500)) {
     fail_('INTEGRITY', 'DRAW_WINNERS is missing a valid name or Participant ID for this prize. Restore the prize records from a backup before resetting.');
   }
-  if (winners.some(winner => db.activeIds.has(winner.id))) {
+  const restoring = winners.filter(winner => db.winsByParticipant.get(winner.id).length === 1);
+  const restoringIds = new Set(restoring.map(winner => winner.id));
+  if (restoring.some(winner => db.activeIds.has(winner.id))) {
     fail_('INTEGRITY', 'ALL IMS already contains a winner from this prize. Resolve the duplicate record before resetting.');
   }
   const outputMeta = db.bookSheets.find(sheet => sheet.properties.sheetId === output.sheetId);
@@ -522,15 +542,16 @@ function resetPrizeRequests_(db, prize, removeSheet = false) {
 
   const requests = [];
   const rosterEnd = db.data[ROSTER].length;
-  resize_(requests, roster, rosterEnd + winners.length, width);
-  if (recoverFromLedger) {
-    requests.push(write_(roster.sheetId, rosterEnd, 0, winners.map(winner => [winner.name, winner.id])));
+  resize_(requests, roster, rosterEnd + restoring.length, width);
+  if (recoverFromLedger && restoring.length) {
+    requests.push(write_(roster.sheetId, rosterEnd, 0, restoring.map(winner => [winner.name, winner.id])));
   }
-  for (let i = 0; i < recordIndexes.length;) {
-    const startRowIndex = recordIndexes[i];
+  const restoreIndexes = recordIndexes.filter(index => restoringIds.has(String(records[index][db.idColumn] ?? '').trim()));
+  for (let i = 0; i < restoreIndexes.length;) {
+    const startRowIndex = restoreIndexes[i];
     const startDestination = rosterEnd + i;
     let endRowIndex = startRowIndex + 1;
-    while (recordIndexes[++i] === endRowIndex) endRowIndex++;
+    while (restoreIndexes[++i] === endRowIndex) endRowIndex++;
     const source = { sheetId: output.sheetId, startRowIndex, endRowIndex, startColumnIndex: 0, endColumnIndex: width };
     const destination = { ...source, sheetId: roster.sheetId, startRowIndex: startDestination, endRowIndex: rosterEnd + i };
     for (const pasteType of ['PASTE_NORMAL', 'PASTE_VALUES']) {
@@ -547,7 +568,7 @@ function resetPrizeRequests_(db, prize, removeSheet = false) {
   // Keep a zero-count record so retries cannot redraw a transaction canceled by a reset.
   requests.push(write_(db.tabs.DRAW_HISTORY.sheetId, 1, SYSTEM.DRAW_HISTORY.length - 1,
     db.history.map(draw => [draw.prizeId === prize.id ? 0 : draw.count])));
-  return requests;
+  return { requests, restored: restoring.length };
 }
 
 function deletePrize_(db, input) {
@@ -559,23 +580,60 @@ function deletePrize_(db, input) {
   if ((draws.at(-1)?.tx || '') !== input.throughTx) {
     fail_('CONFLICT', 'This prize changed. Refresh data and confirm the deletion again.');
   }
-  const requests = prize.won ? resetPrizeRequests_(db, prize, true) : [];
+  const requests = prize.won ? resetPrizeRequests_(db, prize, true).requests : [];
   requests.push({ deleteSheet: { sheetId: prize.sheetId } });
   const prizes = db.tabs.PRIZES;
   resize_(requests, prizes, (prizes.gridProperties.frozenRowCount || 0) + 2, 0);
   deleteRows_(requests, prizes, [prize.index]);
-  const archiveRow = db.data.SETTINGS.findIndex(([name]) => name === ARCHIVED_PRIZE + prize.id);
-  if (archiveRow >= 3) deleteRows_(requests, db.tabs.SETTINGS, [archiveRow]);
+  const settingRows = db.data.SETTINGS.flatMap(([name], index) =>
+    name === ARCHIVED_PRIZE + prize.id || name === ALL_PARTICIPANTS + prize.id ? [index] : []);
+  deleteRows_(requests, db.tabs.SETTINGS, settingRows);
   commit_(db, requests);
   return { deleted: true };
 }
 
 function receipt_(db, draw, reelNames) {
+  const prize = db.prizes.find(item => item.id === draw.prizeId);
   return {
     ...draw,
     winners: db.winnersByDraw.get(draw.tx).slice().sort((a, b) => a.position - b.position).map(winner => winner.name),
-    names: reelNames || db.eligible.map(person => person.name)
+    names: reelNames || participantsForPrize_(db, prize).map(person => person.name)
   };
+}
+
+function participantsForPrize_(db, prize) {
+  if (!prize?.allParticipants) return db.eligible;
+  const alreadyWon = db.winnersByPrize.get(prize.id);
+  const previous = [];
+  for (const [id, wins] of db.winsByParticipant) {
+    if (!alreadyWon?.has(id)) previous.push({ id, name: wins.at(-1).name });
+  }
+  return [...db.eligible, ...previous];
+}
+
+function priorWinnerRecord_(db, person, headers, columns, recordsByPrize, cache) {
+  for (const win of db.winsByParticipant.get(person.id).slice().reverse()) {
+    const prize = db.prizes.find(item => item.id === win.prizeId);
+    if (!cache.has(prize.id)) {
+      const records = recordsByPrize[prize.name];
+      const layout = Array.from({ length: Math.max(headers.length, records[0]?.length || 0) },
+        (_, index) => records[0]?.[index] ?? '');
+      const indexed = new Map();
+      if (JSON.stringify(layout) === JSON.stringify(headers)) {
+        records.slice(1).forEach((row, offset) => {
+          const id = String(row[columns] ?? '').trim();
+          if (id) indexed.set(id, indexed.has(id) || row.length > headers.length ? null : offset + 1);
+        });
+      }
+      cache.set(prize.id, indexed);
+    }
+    const row = cache.get(prize.id).get(person.id);
+    if (row) return { sheetId: prize.sheetId, row };
+  }
+  if (headers.length === 2 && db.nameHeader === 'Name' && db.headers[0] === 'Name' && columns === 1) {
+    return { values: [person.name, person.id] };
+  }
+  fail_('INTEGRITY', 'A previous winner record is missing or its columns changed. Restore the original prize record before drawing.');
 }
 
 function randomStream_(key, context) {
@@ -618,11 +676,18 @@ function draw_(db, key, input) {
   if (prize.archived) fail_('VALIDATION', 'This prize is archived. Select another prize.');
   if (db.source.merges?.length) fail_('VALIDATION', 'Unmerge ALL IMS cells before drawing.');
   if (db.invalid) fail_('VALIDATION', 'Check the name column and fix incomplete participant rows before drawing.');
-  if (db.excluded) fail_('VALIDATION', 'ALL IMS includes previous winners. Remove those re-imported records before drawing.');
-  const count = Math.min(prize.perDraw, prize.remaining, db.eligible.length);
+  if (db.excluded && !prize.allParticipants) {
+    fail_('VALIDATION', 'ALL IMS includes previous winners. Remove those re-imported records before drawing.');
+  }
+  const participants = participantsForPrize_(db, prize);
+  if (prize.allParticipants && participants.some(person =>
+    typeof person.name !== 'string' || !person.name.trim() || person.name.length > 500)) {
+    fail_('INTEGRITY', 'A previous winner has a missing or invalid name in DRAW_WINNERS.');
+  }
+  const count = Math.min(prize.perDraw, prize.remaining, participants.length);
   if (!count) fail_('VALIDATION', 'There are no eligible participants or winning slots for this prize.');
-  const names = db.eligible.map(person => person.name);
-  const selected = select_(db.eligible, count, randomStream_(key, db.id + '/' + tx + '/' + prize.id));
+  const names = participants.map(person => person.name);
+  const selected = select_(participants, count, randomStream_(key, db.id + '/' + tx + '/' + prize.id));
   const width = db.data[ROSTER].reduce((max, row) => Math.max(max, row.length), db.headers.length);
   const ids = db.idColumn < 0 ? width : db.idColumn;
   const headers = Array.from({ length: Math.max(width, ids + 1) }, (_, i) => i === ids && db.idColumn < 0 ? ID_HEADER : db.rawHeaders[i] ?? '');
@@ -643,7 +708,7 @@ function draw_(db, key, input) {
     const values = [];
     do {
       const person = missing[i++];
-      do { person.id = Utilities.getUuid(); } while (db.activeIds.has(person.id) || db.winnerIds.has(person.id));
+      do { person.id = Utilities.getUuid(); } while (db.activeIds.has(person.id) || db.winsByParticipant.has(person.id));
       db.activeIds.add(person.id);
       values.push([person.id]);
     } while (missing[i]?.row === start + values.length);
@@ -652,9 +717,23 @@ function draw_(db, key, input) {
   resize_(requests, output, existing.length + count, headers.length);
   if (!prize.won) requests.push(write_(output.sheetId, 0, 0, [headers]), header_(output.sheetId, headers.length));
   const span = (sheetId, row) => ({ sheetId, startRowIndex: row, endRowIndex: row + 1, startColumnIndex: 0, endColumnIndex: headers.length });
+  const priorPrizeIds = new Set(selected.flatMap(person => person.row === undefined
+    ? db.winsByParticipant.get(person.id).map(win => win.prizeId) : []));
+  const priorTitles = db.prizes.filter(prize => priorPrizeIds.has(prize.id)).map(prize => prize.name);
+  const recordsByPrize = Object.create(null);
+  for (let i = 0; i < priorTitles.length; i += 20) {
+    Object.assign(recordsByPrize, rows_(db.id, priorTitles.slice(i, i + 20)));
+  }
+  const priorRecords = new Map();
   selected.forEach((person, index) => {
-    const source = span(roster.sheetId, person.row);
+    const record = person.row !== undefined ? { sheetId: roster.sheetId, row: person.row } :
+      priorWinnerRecord_(db, person, headers, ids, recordsByPrize, priorRecords);
     const destination = span(output.sheetId, existing.length + index);
+    if (record.values) {
+      requests.push(write_(output.sheetId, existing.length + index, 0, [record.values]));
+      return;
+    }
+    const source = span(record.sheetId, record.row);
     requests.push({ copyPaste: { source, destination, pasteType: 'PASTE_NORMAL', pasteOrientation: 'NORMAL' } },
       { copyPaste: { source, destination, pasteType: 'PASTE_VALUES', pasteOrientation: 'NORMAL' } });
   });
@@ -665,7 +744,7 @@ function draw_(db, key, input) {
   resize_(requests, winners, db.data.DRAW_WINNERS.length + count, SYSTEM.DRAW_WINNERS.length);
   requests.push(write_(history.sheetId, db.data.DRAW_HISTORY.length, 0, [[tx, prize.id, prize.name, db.eventName, at, count]]),
     write_(winners.sheetId, db.data.DRAW_WINNERS.length, 0, selected.map((person, i) => [tx, prize.id, person.id, person.name, i + 1])));
-  deleteRows_(requests, roster, selected.map(person => person.row));
+  deleteRows_(requests, roster, selected.flatMap(person => person.row === undefined ? [] : [person.row]));
   commit_(db, requests);
   return { tx, prizeId: prize.id, prizeName: prize.name, eventName: db.eventName, at, count, winners: selected.map(person => person.name), names };
 }

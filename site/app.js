@@ -525,7 +525,7 @@ function startOperator() {
         resetRequest = { prizeId: prize.id, throughTx };
         const winners = number.format(prize.won) + (prize.won === 1 ? ' winner' : ' winners');
         say('reset-warning', 'Resetting “' + prize.name + '” returns ' + winners +
-          ' to ALL IMS and clears their wins for this prize. They can enter future draws again.');
+          ' to ALL IMS if they have no other wins. All wins for this prize will be cleared.');
         formError($('reset-form'));
         $('reset-dialog').showModal();
         renderControls();
@@ -589,16 +589,19 @@ function startOperator() {
   function renderControls() {
     const prizes = state?.prizes.filter(item => !item.archived) || [];
     const prize = prizes.find(item => item.id === selected);
-    const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, state?.eligible || 0);
+    const eligible = prize?.eligible ?? state?.eligible ?? 0;
+    const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, eligible);
     const waiting = token && pending();
     const confirming = $('disconnect-dialog').open || $('reset-dialog').open || $('bulk-dialog').open || $('archived-dialog').open;
     $('prize-select').disabled = !prizes.length || mutation || !!active();
     $('prizes-select-mode').disabled = mutation || (!prizes.length && !selectingPrizes);
-    $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting || !!state?.invalid || !!state?.excluded;
+    $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting ||
+      !!state?.invalid || (!!state?.excluded && !prize?.allParticipants);
     if ($('draw').disabled) offeredDraw = null;
     else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
     say('draw', mutation ? 'Saving…' : count ? 'Draw ' + number.format(count) + (count === 1 ? ' winner' : ' winners') : 'Draw winners');
-    say('slots', prize ? number.format(prize.remaining) + ' winning slots remaining' :
+    const pool = prize?.allParticipants ? ' · ' + number.format(eligible) + ' eligible, including earlier winners' : '';
+    say('slots', prize ? number.format(prize.remaining) + ' winning slots remaining' + pool :
       !state ? 'Connect to load your prizes.' :
         !prizes.length && state.prizes.length ? 'All prizes are archived.' :
           prizes.length && prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
@@ -752,8 +755,8 @@ function startOperator() {
     const deleting = action === 'deletePrize';
     say('bulk-heading', (deleting ? 'Delete ' : 'Reset ') + quantity + '?');
     say('bulk-warning', deleting
-      ? 'This permanently deletes the selected prize worksheets and any remaining contents. Winners from these prizes return to ALL IMS and can enter future draws.'
-      : 'This clears the wins for the selected prizes and returns their winners to ALL IMS. They can enter future draws again.');
+      ? 'This permanently deletes the selected prize worksheets and any remaining contents. Winners return to ALL IMS if they have no other wins.'
+      : 'This clears the wins for the selected prizes. Winners return to ALL IMS if they have no other wins.');
     say('bulk-confirm', deleting ? 'Delete prizes' : 'Reset prizes');
     $('bulk-dialog').showModal();
     renderControls();
@@ -807,6 +810,11 @@ function startOperator() {
     $('prize-name').value = prize?.name || '';
     $('prize-limit').value = prize?.limit || 1;
     $('prize-count').value = prize?.perDraw || 1;
+    $('prize-all-participants').checked = prize?.allParticipants ?? false;
+    $('prize-all-participants').disabled = !state?.allParticipantsMode;
+    say('prize-participants-hint', state?.allParticipantsMode
+      ? 'Include earlier winners. Each person can win this prize once.'
+      : 'Deploy the updated Apps Script version to enable this option.');
     formError($('prize-form'));
     $('prize-dialog').showModal();
   }
@@ -978,7 +986,8 @@ function startOperator() {
   $('prize-form').addEventListener('submit', event => {
     event.preventDefault();
     saveForm(event.currentTarget, 'prize', {
-      id: editingPrize, name: $('prize-name').value, limit: $('prize-limit').valueAsNumber, perDraw: $('prize-count').valueAsNumber
+      id: editingPrize, name: $('prize-name').value, limit: $('prize-limit').valueAsNumber, perDraw: $('prize-count').valueAsNumber,
+      ...(state?.allParticipantsMode && { allParticipants: $('prize-all-participants').checked })
     });
   });
   $('reset-form').addEventListener('submit', event => {

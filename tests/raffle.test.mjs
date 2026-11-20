@@ -334,6 +334,60 @@ test('projector sync shares selections and committed draw progress across operat
   assert.equal(ok(app.request('presentation')).snapshot, null);
 });
 
+test('All participants includes earlier winners once per prize and preserves overlapping awards', () => {
+  const app = fixture();
+  app.initialize();
+  const header = ['Name', 'Participant ID', 'Team'];
+  const people = [['Same name', '001', 'Blue'], ['Same name', '002', 'Red']];
+  app.loadRoster([header, ...people]);
+  const regular = ok(app.request('prize', { name: 'Regular', limit: 2, perDraw: 2 })).id;
+  const special = { name: 'Special', limit: 3, perDraw: 1 };
+  special.id = ok(app.request('prize', special)).id;
+  const regularTx = randomUUID();
+  ok(app.request('draw', { prizeId: regular, tx: regularTx }));
+  assert.deepEqual(app.data('ALL IMS'), [header]);
+  assert.equal(app.request('draw', { prizeId: special.id, tx: randomUUID() }).code, 'VALIDATION');
+  assert.equal(app.request('prize', { ...special, allParticipants: 'true' }).code, 'VALIDATION');
+  ok(app.request('prize', { ...special, allParticipants: true }));
+  ok(app.request('prize', special));
+  assert.equal(ok(app.request('state')).prizes.find(prize => prize.id === special.id).eligible, 2);
+  const first = { prizeId: special.id, tx: randomUUID() };
+  const second = { prizeId: special.id, tx: randomUUID() };
+  ok(app.request('draw', first));
+  const result = ok(app.request('draw', second));
+  assert.equal(result.names.length, 1);
+  assert.equal(app.request('draw', { prizeId: special.id, tx: randomUUID() }).code, 'VALIDATION');
+  assert.deepEqual(app.data('Special').slice(1).sort((a, b) => a[1].localeCompare(b[1])), people);
+  assert.equal(app.data('Regular').length, 3);
+  const state = ok(app.request('state'));
+  assert.deepEqual([state.total, state.eligible, state.won, state.history.length], [2, 0, 2, 4]);
+
+  assert.equal(ok(app.request('resetPrize', { prizeId: regular, throughTx: regularTx })).restored, 0);
+  assert.deepEqual(app.data('ALL IMS'), [header]);
+  ok(app.request('deletePrize', { prizeId: special.id, throughTx: second.tx }));
+  assert.deepEqual(app.data('ALL IMS').slice(1).sort((a, b) => a[1].localeCompare(b[1])), people);
+  assert.equal(ok(app.request('state')).eligible, 2);
+});
+
+test('All participants can recover earlier winners from the two-column ledger', () => {
+  const app = fixture();
+  app.initialize();
+  const header = ['Name', 'Participant ID'];
+  app.loadRoster([header, ['Employee', '001']]);
+  const prior = ok(app.request('prize', { name: 'Earlier Prize', limit: 1, perDraw: 1 })).id;
+  ok(app.request('draw', { prizeId: prior, tx: randomUUID() }));
+  app.loadRows('Earlier Prize', [header]);
+  ok(app.request('archivePrize', { prizeId: prior, archived: true }));
+  const prize = { name: 'Special Prize', limit: 1, perDraw: 1, allParticipants: true };
+  prize.id = ok(app.request('prize', prize)).id;
+  ok(app.request('prize', { ...prize, allParticipants: false }));
+  assert.equal(app.request('draw', { prizeId: prize.id, tx: randomUUID() }).code, 'VALIDATION');
+  ok(app.request('prize', prize));
+  ok(app.request('draw', { prizeId: prize.id, tx: randomUUID() }));
+  assert.deepEqual(app.data('Special Prize'), [header, ['Employee', '001']]);
+  assert.deepEqual(app.data('ALL IMS'), [header]);
+});
+
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {
   const steps = 52;
   const sequence = Array.from({ length: 11 }, (_, i) => positionAt(i / 10, steps));
