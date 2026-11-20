@@ -131,7 +131,9 @@
     <dialog id="redraw-dialog" aria-labelledby="redraw-heading" aria-describedby="redraw-warning">
       <form id="redraw-form" method="dialog">
         <h2 id="redraw-heading">Re-draw this winner?</h2>
-        <p class="dialog-copy" id="redraw-warning"></p>
+        <p class="dialog-copy" id="redraw-warning">A different eligible participant will take the selected winner’s spot in Google Sheets.</p>
+        <label for="redraw-winner">Winner to replace</label>
+        <select id="redraw-winner"></select>
         <p class="dialog-error" id="redraw-error" role="alert" hidden></p>
         <div class="dialog-actions">
           <button id="redraw-cancel" type="button" autofocus>Cancel</button>

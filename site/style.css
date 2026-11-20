@@ -1196,7 +1196,8 @@ dialog .error {
   color: var(--stage-muted);
   margin: 0;
 }
-#projector-advance {
+#projector-advance,
+#redraw-winner {
   color-scheme: dark;
   background-image: none;
   appearance: auto;

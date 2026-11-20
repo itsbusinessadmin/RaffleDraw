@@ -32,14 +32,17 @@ function node(tag, label) {
 function renderResults(id, run) {
   const list = $(id);
   const count = run?.revealed ?? 0;
-  const tx = run ? run.receipt.tx + ':' + (run.receipt.redrawTx || '') : '';
+  const redrawing = run?.phase === 'spin' && run.index < count ? run.index : -1;
+  const tx = run ? [run.receipt.tx, run.receipt.redrawTx, redrawing].join(':') : '';
   if (list.dataset.tx !== tx || list.children.length > count) {
     list.replaceChildren();
     list.dataset.tx = tx;
   }
   if (list.hidden !== !count) list.hidden = !count;
   if (list.children.length === count) return;
-  list.append(...run.receipt.winners.slice(list.children.length, count).map(name => node('li', name)));
+  const start = list.children.length;
+  list.append(...run.receipt.winners.slice(start, count).map((name, offset) =>
+    node('li', start + offset === redrawing ? '—' : name)));
 }
 
 if (isProjector) {
@@ -54,6 +57,7 @@ if (isProjector) {
   const redrawDialog = $('redraw-dialog');
   const redrawConfirm = $('redraw-confirm');
   const redrawCancel = $('redraw-cancel');
+  const redrawWinner = $('redraw-winner');
   let live = null;
   let frame = 0;
   $('operator').hidden = true;
@@ -83,7 +87,7 @@ if (isProjector) {
     $('projector-action').hidden = !!remote;
     actionButton.disabled = remote || (revealing ? !manualHold || !nextReady : !drawTx);
     let actionLabel = revealing ? 'Drawing…' : 'Draw';
-    if (manualHold) actionLabel = run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner';
+    if (manualHold) actionLabel = run.revealed === run.receipt.count ? 'Finish draw' : 'Next winner';
     say('projector-action-button', actionLabel);
     const redrawRequiresUpdate = live.redrawSupported === false;
     const redrawUpdateMessage = 'Deploy the updated Google Apps Script to enable Re-draw.';
@@ -91,8 +95,13 @@ if (isProjector) {
     redrawButton.disabled = !live.canRedraw;
     redrawButton.title = live.canRedraw ? '' : redrawRequiresUpdate ? redrawUpdateMessage : 'Available while a winner is on the ticket.';
     if (live.redrawPrompt && document.fullscreenElement === projector) {
-      say('redraw-warning', 'Replace “' + run.receipt.winners[run.index] +
-        '” for this prize? A different eligible participant will take this winning spot in Google Sheets.');
+      if (!redrawDialog.open) {
+        redrawWinner.replaceChildren(...run.receipt.winners.slice(0, run.revealed).map((name, index) =>
+          new Option((index + 1) + '. ' + name, String(index + 1))));
+        redrawWinner.value = String(run.index + 1);
+      }
+      if (live.redrawPending) redrawWinner.value = String(live.redrawPending);
+      redrawWinner.disabled = !!(live.redrawBusy || live.redrawPending);
       showMessage('redraw-error', live.redrawError);
       redrawConfirm.disabled = !!live.redrawBusy;
       redrawCancel.disabled = live.redrawBusy || live.redrawPending;
@@ -164,7 +173,7 @@ if (isProjector) {
     event.preventDefault();
     if (!redrawConfirm.disabled && live?.redrawPrompt) {
       redrawConfirm.disabled = true;
-      channel.postMessage({ type: 'redraw-confirm' });
+      channel.postMessage({ type: 'redraw-confirm', position: Number(redrawWinner.value) });
     }
   });
   advanceSelect.addEventListener('change', () => {
@@ -302,7 +311,7 @@ function startOperator() {
       advanceEditable: !!state && !!token && !active() && !mutation,
       nextReady: canAdvance(), canRedraw: canPromptRedraw(), redrawSupported: state ? !!state.redrawMode : null,
       redrawPrompt, redrawError,
-      redrawBusy: redrawPrompt && mutation, redrawPending: redrawPrompt && !!pendingRedraw()
+      redrawBusy: redrawPrompt && mutation, redrawPending: redrawPrompt ? pendingRedraw()?.position : null
     });
   }
 
@@ -436,9 +445,15 @@ function startOperator() {
         publish();
         return;
       }
+      const position = retry?.position ?? message.position;
+      if (!Number.isSafeInteger(position) || position < 1 || position > run.revealed) {
+        redrawError = 'Choose a revealed winner to replace.';
+        publish();
+        return;
+      }
       const request = retry || {
         tx: crypto.randomUUID(), started: Date.now(), drawTx: run.receipt.tx, prizeId: run.receipt.prizeId,
-        position: run.index + 1, throughRedrawTx: run.receipt.redrawTx, advance: run.advance,
+        position, revealed: run.revealed, throughRedrawTx: run.receipt.redrawTx, advance: run.advance,
         revealSeconds: run.spin / 1000, namesPerSecond: run.namesPerSecond, winnerSeconds: run.hold / 1000
       };
       commitDraw(request);
@@ -672,7 +687,8 @@ function startOperator() {
 
   function pendingRedraw() {
     const request = pending();
-    return run && request?.drawTx === run.receipt.tx && request.position === run.index + 1 ? request : null;
+    return run && request?.drawTx === run.receipt.tx && request.throughRedrawTx === run.receipt.redrawTx &&
+      request.position >= 1 && request.position <= run.revealed ? request : null;
   }
 
   function renderBulkActions() {
@@ -732,7 +748,7 @@ function startOperator() {
     $('next').disabled = !canAdvance();
     $('all').disabled = !active() || waitingForWinner;
     showMessage('winner-hold-note', waitingForWinner && run.advance === 'manual' ? holdMessage : '');
-    say('next', run?.index + 1 === run?.receipt.count ? 'Finish draw' : 'Next winner');
+    say('next', run && run.revealed === run.receipt.count ? 'Finish draw' : 'Next winner');
     say('pause', run?.pausedAt ? 'Resume' : 'Pause');
     if (!run) {
       const label = prize ? 'Ready to draw' : 'Waiting for a prize';
@@ -777,7 +793,7 @@ function startOperator() {
 
   function land() {
     if (!run || run.phase !== 'spin') return;
-    Object.assign(run, { phase: 'hold', start: Date.now(), pausedAt: null, revealed: run.index + 1 });
+    Object.assign(run, { phase: 'hold', start: Date.now(), pausedAt: null, revealed: Math.max(run.revealed, run.index + 1) });
     updateReveal();
   }
 
@@ -807,7 +823,7 @@ function startOperator() {
         }
       }
     } else {
-      Object.assign(run, { phase: 'spin', start: Date.now(), index: run.index + 1, pausedAt: null });
+      Object.assign(run, { phase: 'spin', start: Date.now(), index: run.revealed, pausedAt: null });
     }
     updateReveal();
   }
@@ -822,7 +838,7 @@ function startOperator() {
       spin: duration(speed, reduceMotion.matches, options.revealSeconds ?? state?.revealSeconds),
       namesPerSecond: options.namesPerSecond,
       hold: Number.isFinite(seconds) && seconds >= 1 && seconds <= 60 ? Math.round(seconds * 1000) : HOLD[speed],
-      pausedAt: null, revealed: index
+      pausedAt: null, revealed: options.drawTx ? options.revealed ?? index : 0
     };
     updateReveal('begin');
   }
