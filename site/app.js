@@ -119,10 +119,11 @@ function startOperator() {
   let prizeOptionsKey = '';
   let editingPrize = '';
   let resetRequest = null;
-  let archiveUndo = null;
   let selectingPrizes = false;
+  let selectingArchived = false;
   let bulkRequest = null;
   const selectedPrizes = new Set();
+  const selectedArchived = new Set();
   const latestDraws = new Map();
   let run = null;
   let offeredDraw = null;
@@ -230,11 +231,13 @@ function startOperator() {
     refreshSequence++;
     state = null;
     run = null;
-    archiveUndo = null;
     selectingPrizes = false;
+    selectingArchived = false;
     selectedPrizes.clear();
+    selectedArchived.clear();
     showMessage('archive-error');
     showMessage('bulk-result');
+    showMessage('archived-bulk-result');
     syncError = '';
     clearTimeout(advanceTimer);
     cancelAnimationFrame(frame);
@@ -271,11 +274,37 @@ function startOperator() {
     }
   }
 
+  function prizeCheckbox(prize, selection) {
+    const label = document.createElement('label');
+    label.className = 'prize-check';
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.value = prize.id;
+    check.checked = selection.has(prize.id);
+    check.setAttribute('aria-label', 'Select ' + prize.name);
+    check.addEventListener('change', () => {
+      if (check.checked) selection.add(prize.id);
+      else selection.delete(prize.id);
+      renderBulkActions();
+    });
+    label.append(check, node('span', prize.name));
+    return label;
+  }
+
   function renderArchived() {
     const prizes = state?.prizes.filter(prize => prize.archived) || [];
+    const archivedIds = new Set(prizes.map(prize => prize.id));
+    for (const id of selectedArchived) if (!archivedIds.has(id)) selectedArchived.delete(id);
+    $('archived-select-mode').setAttribute('aria-pressed', String(selectingArchived));
+    say('archived-select-mode', selectingArchived ? 'Done' : 'Select');
+    $('archived-bulk-actions').hidden = !selectingArchived;
     showMessage('archived-empty', prizes.length ? '' : state ? 'No archived prizes.' : 'Connect Google Sheets to view archived prizes.');
     $('archived-list').replaceChildren(...prizes.map(prize => {
       const item = document.createElement('li');
+      if (selectingArchived) {
+        item.append(prizeCheckbox(prize, selectedArchived));
+        return item;
+      }
       const restore = node('button', 'Restore');
       restore.type = 'button';
       restore.className = 'restore-prize';
@@ -288,6 +317,8 @@ function startOperator() {
 
   function renderDashboard() {
     const prizes = state?.prizes.filter(prize => !prize.archived) || [];
+    showMessage('total-prize-count', state ? number.format(state.prizes.length) : '');
+    showMessage('archived-prize-count', state ? number.format(state.prizes.length - prizes.length) : '');
     const availableIds = new Set(prizes.map(prize => prize.id));
     for (const id of selectedPrizes) if (!availableIds.has(id)) selectedPrizes.delete(id);
     if (!prizes.some(prize => prize.id === selected && prize.remaining)) selected = prizes.find(prize => prize.remaining)?.id || '';
@@ -364,21 +395,7 @@ function startOperator() {
       const statusCell = document.createElement('td');
       statusCell.append(status);
       const nameCell = node('td', prize.name);
-      if (selectingPrizes) {
-        const label = document.createElement('label');
-        label.className = 'prize-check';
-        const check = document.createElement('input');
-        check.type = 'checkbox';
-        check.checked = selectedPrizes.has(prize.id);
-        check.setAttribute('aria-label', 'Select ' + prize.name);
-        check.addEventListener('change', () => {
-          if (check.checked) selectedPrizes.add(prize.id);
-          else selectedPrizes.delete(prize.id);
-          renderBulkActions();
-        });
-        label.append(check, node('span', prize.name));
-        nameCell.replaceChildren(label);
-      }
+      if (selectingPrizes) nameCell.replaceChildren(prizeCheckbox(prize, selectedPrizes));
       actions.hidden = selectingPrizes;
       row.append(nameCell, awarded, node('td', number.format(prize.perDraw)),
         node('td', number.format(prize.remaining)), statusCell, actions);
@@ -386,9 +403,6 @@ function startOperator() {
     }));
     showMessage('prize-empty', prizes.length ? '' : !state ? 'Prizes will appear after you connect.' :
       state.prizes.length ? 'All prizes are archived.' : 'Add the first prize to start drawing.');
-    if (!state?.prizes.some(prize => prize.id === archiveUndo?.id && prize.archived)) archiveUndo = null;
-    $('archive-feedback').hidden = !archiveUndo;
-    say('archive-message', archiveUndo ? 'Archived “' + archiveUndo.name + '”.' : '');
     const warnings = [];
     if (state?.invalid) warnings.push(number.format(state.invalid) + ' participant rows need a valid name. Review the name column in Settings.');
     if (state?.excluded) warnings.push(number.format(state.excluded) + ' previous winners are back in ALL IMS. Remove their re-imported rows before drawing.');
@@ -402,11 +416,22 @@ function startOperator() {
   }
 
   function renderBulkActions() {
-    const blocked = !selectedPrizes.size || mutation || !!active() || !!(token && pending());
+    const unavailable = mutation || !!active() || !!(token && pending());
+    const blocked = !selectedPrizes.size || unavailable;
     say('selected-prize-count', number.format(selectedPrizes.size) + ' selected');
+    say('archived-selected-count', number.format(selectedArchived.size) + ' selected');
     $('bulk-archive').disabled = blocked;
     $('bulk-delete').disabled = blocked;
     $('bulk-reset').disabled = blocked || ![...selectedPrizes].some(id => latestDraws.has(id));
+    $('bulk-restore').disabled = unavailable || !selectedArchived.size;
+    for (const [list, button, selection] of [
+      [$('prizes'), $('prizes-select-all'), selectedPrizes],
+      [$('archived-list'), $('archived-select-all'), selectedArchived]
+    ]) {
+      const count = list.querySelectorAll('input[type="checkbox"]').length;
+      button.disabled = mutation || !count;
+      say(button.id, count && selection.size === count ? 'Clear Selection' : 'Select All');
+    }
   }
 
   function renderControls() {
@@ -430,9 +455,11 @@ function startOperator() {
     for (const button of document.querySelectorAll('.reset-prize')) {
       button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
     }
-    for (const button of document.querySelectorAll('.archive-prize, .restore-prize, #archive-undo')) {
+    for (const button of document.querySelectorAll('.archive-prize, .restore-prize')) {
       button.disabled = mutation || !!active() || !!waiting;
     }
+    $('archived-select-mode').disabled = mutation ||
+      (!selectingArchived && !state?.prizes.some(item => item.archived));
     for (const check of document.querySelectorAll('.prize-check input')) check.disabled = mutation;
     renderBulkActions();
     $('reveal-actions').hidden = !active();
@@ -533,19 +560,16 @@ function startOperator() {
     const errorId = $('archived-dialog').open ? 'archived-error' : 'archive-error';
     showMessage(errorId);
     renderControls();
-    let changed = false;
     try {
       const result = await api('archivePrize', { prizeId: prize.id, archived });
       if (result.archived !== archived) throw new Error('The API could not confirm the archive change. Refresh data and try again.');
       const current = state?.prizes.find(item => item.id === prize.id);
       if (!current) return;
       current.archived = archived;
-      archiveUndo = archived ? current : null;
       if (archived && run?.receipt.prizeId === prize.id) {
         run = null;
         renderResults('operator-results', null);
       }
-      changed = true;
     } catch (error) {
       const message = error.code === 'BAD_REQUEST' && error.message === 'Unknown action.'
         ? 'Deploy the updated Apps Script version to use prize archiving.' : error.message;
@@ -555,7 +579,7 @@ function startOperator() {
       renderDashboard();
       if (document.activeElement === document.body) {
         const target = $('archived-dialog').open ? $('archived-dialog').querySelector('[data-close]') :
-          changed && archived ? $('archive-undo') : $('archive-' + prize.id);
+          $('archive-' + prize.id) || $('archived-open');
         target?.focus({ preventScroll: true });
       }
     }
@@ -582,27 +606,30 @@ function startOperator() {
     renderControls();
   }
 
-  async function runBulk(action, prizes) {
+  async function runBulk(action, prizes, restoring = false) {
     if (!prizes.length || !token || mutation || active() || pending()) return;
     mutation = true;
     refreshSequence++;
-    showMessage('archive-error');
-    showMessage('bulk-result', 'Updating ' + number.format(prizes.length) + ' selected ' + (prizes.length === 1 ? 'prize…' : 'prizes…'));
+    const selection = restoring ? selectedArchived : selectedPrizes;
+    const errorId = restoring ? 'archived-error' : 'archive-error';
+    const resultId = restoring ? 'archived-bulk-result' : 'bulk-result';
+    showMessage(errorId);
+    showMessage(resultId, 'Updating ' + number.format(prizes.length) + ' selected ' + (prizes.length === 1 ? 'prize…' : 'prizes…'));
     if ($('bulk-dialog').open) $('bulk-dialog').close();
     renderControls();
     const failures = [];
     try {
       for (const prize of prizes) {
         try {
-          await api(action, { prizeId: prize.id, throughTx: prize.throughTx, ...(action === 'archivePrize' && { archived: true }) });
+          await api(action, { prizeId: prize.id, throughTx: prize.throughTx, ...(action === 'archivePrize' && { archived: !restoring }) });
           const current = state?.prizes.find(item => item.id === prize.id);
-          if (current && action === 'archivePrize') current.archived = true;
+          if (current && action === 'archivePrize') current.archived = !restoring;
           if (current && action === 'deletePrize') state.prizes = state.prizes.filter(item => item.id !== prize.id);
           if (run?.receipt.prizeId === prize.id) {
             run = null;
             renderResults('operator-results', null);
           }
-          selectedPrizes.delete(prize.id);
+          selection.delete(prize.id);
         } catch (error) {
           const message = error.code === 'BAD_REQUEST' && error.message === 'Unknown action.'
             ? 'Deploy the updated Apps Script version to use this action.' : error.message;
@@ -615,9 +642,9 @@ function startOperator() {
       renderDashboard();
     }
     const successes = prizes.length - failures.length;
-    const verb = action === 'archivePrize' ? 'Archived' : action === 'resetPrize' ? 'Reset' : 'Deleted';
-    showMessage('bulk-result', successes ? verb + ' ' + number.format(successes) + (successes === 1 ? ' prize.' : ' prizes.') : '');
-    showMessage('archive-error', failures.length ? failures.slice(0, 3).join(' ') +
+    const verb = restoring ? 'Restored' : action === 'archivePrize' ? 'Archived' : action === 'resetPrize' ? 'Reset' : 'Deleted';
+    showMessage(resultId, successes ? verb + ' ' + number.format(successes) + (successes === 1 ? ' prize.' : ' prizes.') : '');
+    showMessage(errorId, failures.length ? failures.slice(0, 3).join(' ') +
       (failures.length > 3 ? ' ' + number.format(failures.length - 3) + ' more failed.' : '') : '');
   }
 
@@ -737,9 +764,11 @@ function startOperator() {
     event.preventDefault();
     saveForm(event.currentTarget, 'settings', { eventName: $('event-name').value, nameHeader: $('name-header').value });
   });
-  $('archive-undo').addEventListener('click', () => setPrizeArchived(archiveUndo, false));
   $('archived-open').addEventListener('click', () => {
+    selectingArchived = false;
+    selectedArchived.clear();
     showMessage('archived-error');
+    showMessage('archived-bulk-result');
     renderArchived();
     $('archived-dialog').showModal();
     renderControls();
@@ -750,6 +779,32 @@ function startOperator() {
     showMessage('bulk-result');
     if (selectingPrizes && $('prizes-panel').hidden) $('prizes-toggle').click();
     renderDashboard();
+  });
+  $('archived-select-mode').addEventListener('click', () => {
+    selectingArchived = !selectingArchived;
+    selectedArchived.clear();
+    showMessage('archived-bulk-result');
+    renderArchived();
+    renderControls();
+  });
+  for (const [list, button, selection] of [
+    [$('prizes'), $('prizes-select-all'), selectedPrizes],
+    [$('archived-list'), $('archived-select-all'), selectedArchived]
+  ]) {
+    button.addEventListener('click', () => {
+      const checks = list.querySelectorAll('input[type="checkbox"]');
+      const selectAll = selection.size !== checks.length;
+      selection.clear();
+      for (const check of checks) {
+        check.checked = selectAll;
+        if (selectAll) selection.add(check.value);
+      }
+      renderBulkActions();
+    });
+  }
+  $('bulk-restore').addEventListener('click', () => {
+    const prizes = state?.prizes.filter(prize => prize.archived && selectedArchived.has(prize.id)) || [];
+    runBulk('archivePrize', prizes, true);
   });
   $('bulk-archive').addEventListener('click', () => runBulk('archivePrize', bulkTargets('archivePrize')));
   $('bulk-reset').addEventListener('click', () => confirmBulk('resetPrize'));

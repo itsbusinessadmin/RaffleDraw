@@ -321,13 +321,28 @@ footer {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
-.section-nav a[aria-current]::after {
+.section-nav a[href="#draw-section"][aria-current]::after {
   content: "";
   width: 6px;
   height: 6px;
   margin-inline-start: auto;
   border-radius: 50%;
   background: currentColor;
+}
+.nav-count {
+  min-inline-size: 1.5rem;
+  padding: 2px 5px;
+  margin-inline-start: auto;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  text-align: center;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.section-nav a,
+#archived-open {
+  gap: 8px;
 }
 .notice {
   border: 1px solid var(--line);
@@ -637,6 +652,9 @@ footer {
   font-size: 0.875rem;
   font-weight: 650;
 }
+.bulk-actions .actions {
+  flex-shrink: 1;
+}
 .prize-check {
   display: flex;
   align-items: center;
@@ -763,17 +781,6 @@ td:first-child {
   border-radius: 2px;
   background: inherit;
 }
-.archive-feedback {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  overflow-wrap: anywhere;
-}
-.archive-feedback button {
-  flex-shrink: 0;
-  color: var(--accent-strong);
-}
 .reset-prize:hover:not(:disabled) {
   border-color: var(--danger);
   background: var(--danger-soft);
@@ -851,6 +858,9 @@ dialog::backdrop {
 }
 dialog h2 {
   margin-bottom: 19px;
+}
+.archived-heading h2 {
+  margin: 0;
 }
 .archived-list {
   max-block-size: 52dvh;
@@ -1058,6 +1068,11 @@ dialog .error {
   #prizes-section .section-head .actions button:not(#prizes-toggle),
   .bulk-actions button {
     padding-inline: 10px;
+  }
+  .section-nav a,
+  #archived-open {
+    gap: 5px;
+    padding-inline: 8px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

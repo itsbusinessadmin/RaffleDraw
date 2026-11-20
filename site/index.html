@@ -22,8 +22,8 @@
   <main id="operator" class="shell">
     <nav class="section-nav" aria-label="Dashboard sections">
       <a href="#draw-section" aria-current="location">Live draw</a>
-      <a href="#prizes-section">Prizes</a>
-      <button id="archived-open" type="button" class="quiet" aria-haspopup="dialog">Archived</button>
+      <a href="#prizes-section">Prizes <span id="total-prize-count" class="nav-count" hidden></span></a>
+      <button id="archived-open" type="button" class="quiet" aria-haspopup="dialog">Archived <span id="archived-prize-count" class="nav-count" hidden></span></button>
     </nav>
     <div class="dashboard">
       <div class="intro">
@@ -78,16 +78,13 @@
             <button id="prizes-toggle" type="button" aria-label="Collapse prize list" aria-controls="prizes-panel" aria-expanded="true" title="Collapse prize list"></button>
           </div>
         </div>
-        <div id="archive-feedback" class="notice archive-feedback" hidden>
-          <p id="archive-message" role="status"></p>
-          <button id="archive-undo" class="quiet" type="button">Undo</button>
-        </div>
         <p id="bulk-result" class="notice" role="status" hidden></p>
         <p id="archive-error" class="notice error" role="alert" hidden></p>
         <div id="prizes-panel">
           <div class="bulk-actions" id="bulk-prize-actions" hidden>
             <p id="selected-prize-count" role="status">0 selected</p>
             <div class="actions">
+              <button id="prizes-select-all" type="button">Select All</button>
               <button id="bulk-archive" type="button">Archive</button>
               <button id="bulk-reset" type="button">Reset</button>
               <button id="bulk-delete" type="button" class="danger">Delete</button>
@@ -117,7 +114,18 @@
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
   </main>
   <dialog id="archived-dialog" aria-labelledby="archived-heading">
-    <h2 id="archived-heading">Archived prizes</h2>
+    <div class="section-head archived-heading">
+      <h2 id="archived-heading">Archived prizes</h2>
+      <button id="archived-select-mode" type="button" aria-pressed="false" disabled>Select</button>
+    </div>
+    <div class="bulk-actions" id="archived-bulk-actions" hidden>
+      <p id="archived-selected-count" role="status">0 selected</p>
+      <div class="actions">
+        <button id="archived-select-all" type="button">Select All</button>
+        <button id="bulk-restore" class="primary" type="button" disabled>Restore</button>
+      </div>
+    </div>
+    <p id="archived-bulk-result" class="dialog-copy" role="status" hidden></p>
     <p id="archived-empty" class="dialog-copy"></p>
     <p id="archived-error" class="error" role="alert" hidden></p>
     <ul id="archived-list" class="archived-list"></ul>
