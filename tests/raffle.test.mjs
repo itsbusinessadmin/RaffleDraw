@@ -112,6 +112,68 @@ test('duplicate identifiers and re-imported winner records block unsafe draws', 
   assert.deepEqual(app.data('One Prize').slice(1), [['One', 'X']]);
 });
 
+test('a re-draw atomically replaces one slot and recovers an uncertain commit without another replacement', () => {
+  const app = fixture();
+  app.initialize();
+  app.loadRoster([['Name', 'Participant ID', 'Team'], ['Alpha', 'A', 'IT'], ['Bravo', 'B', 'HR'], ['Charlie', 'C', 'Sales']]);
+  const prizeId = ok(app.request('prize', { name: 'Gift', limit: 2, perDraw: 2 })).id;
+  const drawTx = randomUUID();
+  const original = ok(app.request('draw', { tx: drawTx, prizeId }));
+  const rosterBefore = app.data('ALL IMS');
+  const prizeBefore = app.data('Gift');
+  const keep = prizeBefore[1];
+  const removed = prizeBefore[2];
+  const [replacement] = rosterBefore.slice(1);
+  const request = { tx: randomUUID(), drawTx, prizeId, position: 2 };
+  app.fail('before');
+  assert.equal(app.request('redraw', request).code, 'BACKEND_ERROR');
+  assert.deepEqual(app.data('Gift'), prizeBefore);
+  assert.deepEqual(app.data('ALL IMS'), rosterBefore);
+  app.fail('after');
+  assert.equal(app.request('redraw', request).code, 'BACKEND_ERROR');
+  const result = ok(app.request('redraw', request));
+  assert.deepEqual(result.winners, [original.winners[0], replacement[0]]);
+  assert.equal(result.redrawTx, request.tx);
+  assert.deepEqual(app.data('Gift'), [prizeBefore[0], keep, replacement]);
+  assert.deepEqual(app.data('ALL IMS'), [rosterBefore[0], removed]);
+  assert.deepEqual(app.data('DRAW_WINNERS').slice(1), [
+    [drawTx, prizeId, keep[1], keep[0], 1], [drawTx, prizeId, replacement[1], replacement[0], 2]
+  ]);
+  assert.equal(app.data('DRAW_HISTORY').length, 2);
+  assert.equal(app.request('redraw', { ...request, tx: randomUUID() }).code, 'CONFLICT');
+  assert.equal(ok(app.request('state')).prizes[0].remaining, 0);
+  assert.deepEqual(ok(app.request('receipt', { tx: drawTx })).winners, result.winners);
+});
+
+test('a re-draw requires a different display name and preserves wins from other prizes', () => {
+  const same = fixture();
+  same.initialize();
+  same.loadRoster([['Name', 'Participant ID'], ['Same Name', 'A'], ['same name', 'B']]);
+  const single = ok(same.request('prize', { name: 'Gift', limit: 1, perDraw: 1 })).id;
+  const singleTx = randomUUID();
+  ok(same.request('draw', { tx: singleTx, prizeId: single }));
+  const writes = same.writes();
+  assert.equal(same.request('redraw', { tx: randomUUID(), drawTx: singleTx, prizeId: single, position: 1 }).code, 'VALIDATION');
+  assert.equal(same.writes(), writes);
+
+  const app = fixture();
+  app.initialize();
+  app.loadRoster([['Name', 'Participant ID', 'Team'], ['Alpha', 'A', 'IT'], ['Bravo', 'B', 'HR']]);
+  const firstId = ok(app.request('prize', { name: 'First Prize', limit: 2, perDraw: 2 })).id;
+  const secondId = ok(app.request('prize', { name: 'Second Prize', limit: 1, perDraw: 1, allParticipants: true })).id;
+  const first = ok(app.request('draw', { tx: randomUUID(), prizeId: firstId }));
+  const drawTx = randomUUID();
+  const second = ok(app.request('draw', { tx: drawTx, prizeId: secondId }));
+  const firstTab = app.data('First Prize');
+  const replacement = firstTab.slice(1).find(row => row[0] !== second.winners[0]);
+  const result = ok(app.request('redraw', { tx: randomUUID(), drawTx, prizeId: secondId, position: 1 }));
+  assert.deepEqual(result.winners, [replacement[0]]);
+  assert.deepEqual(app.data('Second Prize').slice(1), [replacement]);
+  assert.deepEqual(app.data('First Prize'), firstTab);
+  assert.deepEqual(app.data('ALL IMS'), [firstTab[0]]);
+  assert.equal(app.request('redraw', { tx: randomUUID(), drawTx: first.tx, prizeId: firstId, position: 1 }).code, 'CONFLICT');
+});
+
 test('prize reset restores whole records and preserves other awards and transaction safety', () => {
   const app = fixture();
   app.initialize();

@@ -1119,8 +1119,34 @@ dialog .error {
 }
 #projector:fullscreen #fullscreen,
 .projector-tools,
-#projector:not(:fullscreen) .projector-action {
+#projector:not(:fullscreen) :is(.projector-action, #projector-redraw) {
   display: none;
+}
+#projector-redraw {
+  position: fixed;
+  inset-inline-start: clamp(16px, 2.5vw, 44px);
+  inset-block-end: clamp(16px, 2.5vw, 44px);
+  z-index: 2;
+  min-height: 44px;
+  font-size: 0.875rem;
+}
+#projector #redraw-dialog {
+  background: #26171c;
+  color: var(--projector-ivory);
+  border-color: var(--projector-line);
+}
+#redraw-dialog .dialog-copy {
+  color: var(--stage-muted);
+}
+#redraw-error {
+  color: #ffb7aa;
+}
+#projector #redraw-confirm:enabled {
+  background: var(--ticket-gold);
+  color: #311c23;
+}
+#projector #redraw-confirm:enabled:hover {
+  background: #ffe3a7;
 }
 #projector:fullscreen .projector-tools {
   display: flex;
@@ -1232,6 +1258,12 @@ dialog .error {
   }
   #projector:fullscreen #projector-results {
     padding-inline-start: 44px;
+  }
+  #projector:fullscreen:has(#projector-redraw:not([hidden])) {
+    padding-block-end: 74px;
+  }
+  #projector-redraw {
+    inset-inline-start: 52px;
   }
 }
 @media (max-width: 1000px) {

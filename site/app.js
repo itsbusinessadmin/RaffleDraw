@@ -32,7 +32,7 @@ function node(tag, label) {
 function renderResults(id, run) {
   const list = $(id);
   const count = run?.revealed ?? 0;
-  const tx = run?.receipt.tx || '';
+  const tx = run ? run.receipt.tx + ':' + (run.receipt.redrawTx || '') : '';
   if (list.dataset.tx !== tx || list.children.length > count) {
     list.replaceChildren();
     list.dataset.tx = tx;
@@ -50,10 +50,14 @@ if (isProjector) {
   const advanceSelect = $('projector-advance');
   const controls = $('projector-controls');
   const toggle = $('projector-toggle');
+  const redrawButton = $('projector-redraw');
+  const redrawDialog = $('redraw-dialog');
+  const redrawConfirm = $('redraw-confirm');
+  const redrawCancel = $('redraw-cancel');
   let live = null;
   let frame = 0;
   $('operator').hidden = true;
-  for (const dialog of document.querySelectorAll('dialog')) dialog.remove();
+  for (const dialog of document.querySelectorAll('dialog:not(#redraw-dialog)')) dialog.remove();
   document.body.classList.add('presentation');
   projector.hidden = false;
   reel.idle('');
@@ -81,6 +85,19 @@ if (isProjector) {
     if (manualHold) actionLabel = run.index + 1 === run.receipt.count ? 'Finish draw' : 'Next winner';
     say('projector-action-button', actionLabel);
     showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
+    redrawButton.hidden = !live.canRedraw && !live.redrawPrompt;
+    redrawButton.disabled = !live.canRedraw;
+    if (live.redrawPrompt && document.fullscreenElement === projector) {
+      say('redraw-warning', 'Replace “' + run.receipt.winners[run.index] +
+        '” for this prize? A different eligible participant will take this winning spot in Google Sheets.');
+      showMessage('redraw-error', live.redrawError);
+      redrawConfirm.disabled = !!live.redrawBusy;
+      redrawCancel.disabled = live.redrawBusy || live.redrawPending;
+      say('redraw-confirm', live.redrawBusy ? 'Re-drawing…' : live.redrawPending ? 'Retry re-draw' : 'Yes, re-draw');
+      if (!redrawDialog.open) redrawDialog.showModal();
+    } else if (redrawDialog.open) {
+      redrawDialog.close();
+    }
     say('projector-event', run?.receipt.eventName || eventName);
     say('projector-prize', run?.receipt.prizeName || prizeName || 'Live draw');
     const caption = $('projector-caption');
@@ -124,7 +141,29 @@ if (isProjector) {
     if (document.fullscreenElement === projector) setControls(controls.hidden);
   });
   document.addEventListener('fullscreenchange', () => {
-    if (document.fullscreenElement !== projector) setControls(false);
+    if (document.fullscreenElement !== projector) {
+      setControls(false);
+      channel.postMessage({ type: 'redraw-cancel' });
+    }
+    if (live) render();
+  });
+  window.addEventListener('pagehide', () => channel.postMessage({ type: 'redraw-cancel' }));
+  redrawButton.addEventListener('click', () => {
+    if (document.fullscreenElement !== projector || !live?.canRedraw) return;
+    const { receipt, index } = live.run;
+    channel.postMessage({ type: 'redraw-prompt', drawTx: receipt.tx, index, throughRedrawTx: receipt.redrawTx });
+  });
+  redrawCancel.addEventListener('click', () => channel.postMessage({ type: 'redraw-cancel' }));
+  redrawDialog.addEventListener('cancel', event => {
+    event.preventDefault();
+    if (!redrawCancel.disabled) channel.postMessage({ type: 'redraw-cancel' });
+  });
+  $('redraw-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!redrawConfirm.disabled && live?.redrawPrompt) {
+      redrawConfirm.disabled = true;
+      channel.postMessage({ type: 'redraw-confirm' });
+    }
   });
   advanceSelect.addEventListener('change', () => {
     if (document.fullscreenElement !== projector || advanceSelect.disabled) return;
@@ -174,6 +213,8 @@ function startOperator() {
   const selectedArchived = new Set();
   const latestDraws = new Map();
   let run = null;
+  let redrawPrompt = false;
+  let redrawError = '';
   let offeredDraw = null;
   let frame = 0;
   let advanceTimer = 0;
@@ -257,7 +298,8 @@ function startOperator() {
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
       drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
       advanceEditable: !!state && !!token && !active() && !mutation,
-      nextReady: canAdvance()
+      nextReady: canAdvance(), canRedraw: canPromptRedraw(), redrawPrompt, redrawError,
+      redrawBusy: redrawPrompt && mutation, redrawPending: redrawPrompt && !!pendingRedraw()
     });
   }
 
@@ -277,6 +319,7 @@ function startOperator() {
       run: run && {
         tx: run.receipt.tx, phase: run.phase, index: run.index, revealed: run.revealed, speed: run.speed, spin: run.spin,
         namesPerSecond: run.namesPerSecond,
+        redrawTx: run.receipt.redrawTx,
         paused: Boolean(run.pausedAt), elapsed: Math.min(60000, Math.max(0, (run.pausedAt ?? Date.now()) - run.start))
       }
     };
@@ -324,10 +367,12 @@ function startOperator() {
       if (snapshot?.run && snapshot.origin !== presentationOrigin) {
         const details = snapshot.run;
         const cached = remotePresentation?.run?.receipt;
-        const receipt = cached?.tx === details.tx ? cached : await api('receipt', { tx: details.tx }, url, key).catch(error => {
+        const receipt = cached?.tx === details.tx && cached.redrawTx === details.redrawTx
+          ? cached : await api('receipt', { tx: details.tx }, url, key).catch(error => {
           if (error.code !== 'NOT_FOUND') throw error;
           return null;
         });
+        if (receipt && receipt.redrawTx !== details.redrawTx) return;
         if (receipt && details.index < receipt.count && details.revealed <= receipt.count) {
           const localTime = Date.now();
           const age = details.paused ? 0 : Math.max(0, now - snapshot.updatedAt);
@@ -369,6 +414,32 @@ function startOperator() {
           message.tx === run.receipt.tx && message.index === run.index) next();
       else publish();
     }
+    if (message?.type === 'redraw-prompt' && canPromptRedraw() &&
+        message.drawTx === run.receipt.tx && message.index === run.index &&
+        message.throughRedrawTx === run.receipt.redrawTx) {
+      redrawPrompt = true;
+      run.pausedAt = Date.now();
+      updateReveal();
+    }
+    if (message?.type === 'redraw-cancel' && redrawPrompt && !mutation && !pendingRedraw()) {
+      redrawPrompt = false;
+      redrawError = '';
+      togglePause();
+    }
+    if (message?.type === 'redraw-confirm' && redrawPrompt && !mutation) {
+      const retry = pendingRedraw();
+      if (!retry && pending()) {
+        redrawError = 'Resolve the pending draw before replacing this winner.';
+        publish();
+        return;
+      }
+      const request = retry || {
+        tx: crypto.randomUUID(), started: Date.now(), drawTx: run.receipt.tx, prizeId: run.receipt.prizeId,
+        position: run.index + 1, throughRedrawTx: run.receipt.redrawTx, advance: run.advance,
+        revealSeconds: run.spin / 1000, namesPerSecond: run.namesPerSecond, winnerSeconds: run.hold / 1000
+      };
+      commitDraw(request);
+    }
   });
 
   function applyState(value) {
@@ -393,6 +464,8 @@ function startOperator() {
     refreshSequence++;
     state = null;
     run = null;
+    redrawPrompt = false;
+    redrawError = '';
     remotePresentation = null;
     presentationRevision = null;
     presentationGeneration++;
@@ -589,6 +662,16 @@ function startOperator() {
     return run?.phase === 'hold' && !run.pausedAt && winnerTimeRemaining() === 0;
   }
 
+  function canPromptRedraw() {
+    return !!state?.redrawMode && !!token && run?.phase === 'hold' && !run.pausedAt &&
+      !mutation && !pending();
+  }
+
+  function pendingRedraw() {
+    const request = pending();
+    return run && request?.drawTx === run.receipt.tx && request.position === run.index + 1 ? request : null;
+  }
+
   function renderBulkActions() {
     const unavailable = mutation || !!active() || !!(token && pending());
     const blocked = !selectedPrizes.size || unavailable;
@@ -628,7 +711,7 @@ function startOperator() {
         !prizes.length && state.prizes.length ? 'All prizes are archived.' :
           prizes.length && prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
     $('retry').hidden = !waiting;
-    $('retry').disabled = mutation || !!active();
+    $('retry').disabled = mutation || (!!active() && !waiting?.drawTx);
     for (const button of document.querySelectorAll('.reset-prize')) {
       button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
     }
@@ -640,7 +723,7 @@ function startOperator() {
     for (const check of document.querySelectorAll('.prize-check input')) check.disabled = mutation;
     renderBulkActions();
     $('reveal-actions').hidden = !active();
-    $('pause').disabled = !active() || (run.phase === 'hold' && run.advance === 'manual');
+    $('pause').disabled = !active() || redrawPrompt || (run.phase === 'hold' && run.advance === 'manual');
     $('skip').disabled = !active() || run.phase !== 'spin';
     const waitingForWinner = run?.phase === 'hold' && !canAdvance();
     $('next').disabled = !canAdvance();
@@ -729,13 +812,14 @@ function startOperator() {
   function begin(receipt, options = {}) {
     const speed = options.speed || 'standard';
     const seconds = options.winnerSeconds;
+    const index = options.drawTx ? options.position - 1 : 0;
     run = {
-      receipt, speed, advance: options.advance || $('advance').value, index: 0,
+      receipt, speed, advance: options.advance || $('advance').value, index,
       phase: 'spin', start: Date.now(),
       spin: duration(speed, reduceMotion.matches, options.revealSeconds ?? state?.revealSeconds),
       namesPerSecond: options.namesPerSecond,
       hold: Number.isFinite(seconds) && seconds >= 1 && seconds <= 60 ? Math.round(seconds * 1000) : HOLD[speed],
-      pausedAt: null, revealed: 0
+      pausedAt: null, revealed: index
     };
     updateReveal('begin');
   }
@@ -750,19 +834,26 @@ function startOperator() {
   }
 
   async function commitDraw(request) {
-    if (!request || mutation || active()) return;
+    if (!request || mutation || (active() && !(request.drawTx && redrawPrompt))) return;
     mutation = true;
     refreshSequence++;
     savePending(request);
     showMessage('issue');
+    redrawError = '';
     renderControls();
     try {
-      const receipt = await api('draw', { tx: request.tx, prizeId: request.prizeId });
+      const { tx, prizeId, drawTx, position, throughRedrawTx } = request;
+      const receipt = drawTx
+        ? await api('redraw', { tx, prizeId, drawTx, position, throughRedrawTx })
+        : await api('draw', { tx, prizeId });
       clearPending(request.tx);
+      redrawPrompt = false;
       if (token) begin(receipt, request);
     } catch (error) {
-      const definitive = ['VALIDATION', 'NOT_FOUND', 'CONFLICT'].includes(error.code);
+      const definitive = ['VALIDATION', 'NOT_FOUND', 'CONFLICT'].includes(error.code) ||
+        (request.drawTx && error.code === 'INTEGRITY');
       if (definitive) clearPending(request.tx);
+      if (request.drawTx) redrawError = error.message;
       showMessage('issue', definitive ? error.message :
         error.message + ' Use Retry pending draw to check or complete transaction ' + request.tx + '.');
     } finally {
@@ -1091,8 +1182,8 @@ function startOperator() {
   $('draw').addEventListener('click', startDraw);
   $('advance').addEventListener('change', publish);
   $('retry').addEventListener('click', () => commitDraw(pending()));
-  $('pause').addEventListener('click', () => {
-    if (!active()) return;
+  function togglePause() {
+    if (!active() || redrawPrompt) return;
     const now = Date.now();
     if (run.pausedAt) {
       run.start += now - run.pausedAt;
@@ -1101,7 +1192,8 @@ function startOperator() {
       run.pausedAt = now;
     }
     updateReveal();
-  });
+  }
+  $('pause').addEventListener('click', togglePause);
   $('skip').addEventListener('click', land);
   $('next').addEventListener('click', next);
   $('all').addEventListener('click', () => {

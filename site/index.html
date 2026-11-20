@@ -125,6 +125,18 @@
       <p id="projector-caption" aria-live="polite"></p>
     </div>
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
+    <button id="projector-redraw" type="button" hidden>Re-draw</button>
+    <dialog id="redraw-dialog" aria-labelledby="redraw-heading" aria-describedby="redraw-warning">
+      <form id="redraw-form" method="dialog">
+        <h2 id="redraw-heading">Re-draw this winner?</h2>
+        <p class="dialog-copy" id="redraw-warning"></p>
+        <p class="dialog-error" id="redraw-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button id="redraw-cancel" type="button" autofocus>Cancel</button>
+          <button id="redraw-confirm" type="submit">Yes, re-draw</button>
+        </div>
+      </form>
+    </dialog>
   </main>
   <dialog id="archived-dialog" aria-labelledby="archived-heading">
     <div class="section-head archived-heading">
