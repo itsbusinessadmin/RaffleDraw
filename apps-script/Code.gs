@@ -5,6 +5,8 @@ const GUARD = 'RAFFLE_WRITE_VERSION';
 const ARCHIVED_PRIZE = 'archivedPrize:';
 const ALL_PARTICIPANTS = 'allParticipants:';
 const DEFAULT_REVEAL_SECONDS = 4.8;
+const DEFAULT_NAMES_PER_SECOND = 11;
+const DEFAULT_WINNER_SECONDS = 1.8;
 const MAX_REVEAL_SECONDS = 60;
 const SYSTEM = {
   SETTINGS: ['key', 'value'],
@@ -101,12 +103,13 @@ function publishPresentation_(cfg, input) {
   let reveal = null;
   if (kind !== 'selection') {
     const tx = tx_(run?.tx);
-    const { phase, index, revealed, elapsed, spin, speed, paused } = run;
+    const { phase, index, revealed, elapsed, spin, speed, paused, namesPerSecond } = run;
     if (!['spin', 'hold', 'complete', 'summary'].includes(phase) ||
         !Number.isSafeInteger(index) || index < 0 || index >= 1000 ||
         !Number.isSafeInteger(revealed) || revealed < 0 || revealed > 1000 ||
         !Number.isSafeInteger(elapsed) || elapsed < 0 || elapsed > 60000 ||
         !Number.isSafeInteger(spin) || spin < 0 || spin > MAX_REVEAL_SECONDS * 1000 ||
+        (namesPerSecond !== undefined && !validNameRate_(namesPerSecond)) ||
         !['standard', 'fast'].includes(speed) || typeof paused !== 'boolean') fail_('VALIDATION', 'Invalid projector reveal.');
     if (kind === 'begin') {
       const history = rows_(cfg.id, ['DRAW_HISTORY']).DRAW_HISTORY;
@@ -116,7 +119,7 @@ function publishPresentation_(cfg, input) {
       const current = presentation_(cfg);
       if (current?.origin !== origin || current.run?.tx !== tx || current.prizeId !== prizeId) return { published: false };
     }
-    reveal = { tx, phase, index, revealed, elapsed, spin, speed, paused };
+    reveal = { tx, phase, index, revealed, elapsed, spin, speed, paused, namesPerSecond };
   }
   const snapshot = { origin, eventName, prizeId, prizeName, advance, run: reveal,
     updatedAt: Date.now(), revision: Utilities.getUuid() };
@@ -338,9 +341,14 @@ function database_(id) {
       [...winnersByPrize.keys()].some(id => !prizes.some(prize => prize.id === id))) {
     fail_('INTEGRITY', 'Prize identifiers and the winner ledger disagree.');
   }
+  const revealSeconds = settings.get('revealSeconds');
+  const namesPerSecond = settings.get('namesPerSecond');
+  const winnerSeconds = settings.get('winnerSeconds');
   return { id, tabs, guard, source, bookSheets: book.sheets, data, headers, rawHeaders, nameHeader, idColumn, eligible, invalid, excluded, history,
     winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds,
-    revealSeconds: validRevealSeconds_(settings.get('revealSeconds')) ? settings.get('revealSeconds') : DEFAULT_REVEAL_SECONDS,
+    revealSeconds: validDurationSeconds_(revealSeconds) ? revealSeconds : DEFAULT_REVEAL_SECONDS,
+    namesPerSecond: validNameRate_(namesPerSecond) ? namesPerSecond : DEFAULT_NAMES_PER_SECOND,
+    winnerSeconds: validDurationSeconds_(winnerSeconds) ? winnerSeconds : DEFAULT_WINNER_SECONDS,
     eventName: String(data.SETTINGS[1][1] || 'Raffle Draw') };
 }
 
@@ -381,6 +389,7 @@ function state_(db) {
   return {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
     presentationSync: true, allParticipantsMode: true, revealSeconds: db.revealSeconds,
+    namesPerSecond: db.namesPerSecond, winnerSeconds: db.winnerSeconds,
     total: db.eligible.length + db.invalid + db.winsByParticipant.size, eligible: db.eligible.length, won: db.winsByParticipant.size,
     invalid: db.invalid, excluded: db.excluded, prizes: db.prizes, lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {
@@ -390,8 +399,12 @@ function state_(db) {
   };
 }
 
-function validRevealSeconds_(value) {
+function validDurationSeconds_(value) {
   return Number.isFinite(value) && value >= 1 && value <= MAX_REVEAL_SECONDS && Math.round(value * 10) / 10 === value;
+}
+
+function validNameRate_(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 30;
 }
 
 function saveSettings_(db, input) {
@@ -401,12 +414,19 @@ function saveSettings_(db, input) {
     fail_('VALIDATION', 'Select an existing participant name column.');
   }
   const requests = [write_(db.tabs.SETTINGS.sheetId, 1, 0, [['eventName', name], ['nameHeader', input.nameHeader]])];
-  if (input.revealSeconds !== undefined) {
-    if (!validRevealSeconds_(input.revealSeconds)) {
-      fail_('VALIDATION', 'Enter a reveal speed from 1 to 60 seconds with up to one decimal place.');
+  const timing = [];
+  for (const [key, label] of [['revealSeconds', 'spin duration'], ['winnerSeconds', 'winner display time']]) {
+    if (input[key] === undefined) continue;
+    if (!validDurationSeconds_(input[key])) {
+      fail_('VALIDATION', 'Enter a ' + label + ' from 1 to 60 seconds with up to one decimal place.');
     }
-    writeSetting_(db, requests, 'revealSeconds', input.revealSeconds);
+    timing.push([key, input[key]]);
   }
+  if (input.namesPerSecond !== undefined) {
+    if (!validNameRate_(input.namesPerSecond)) fail_('VALIDATION', 'Enter a name scroll speed from 1 to 30 names per second.');
+    timing.push(['namesPerSecond', input.namesPerSecond]);
+  }
+  if (timing.length) writeSettings_(db, requests, timing);
   commit_(db, requests);
   return { saved: true };
 }
@@ -446,7 +466,7 @@ function savePrize_(db, input) {
   resize_(requests, ledger, row + 1, SYSTEM.PRIZES.length);
   requests.push(write_(ledger.sheetId, row, 0, [[prizeId, sheetId, name, limit, perDraw, current?.at || new Date().toISOString()]]));
   if (input.allParticipants !== undefined && input.allParticipants !== (current?.allParticipants ?? false)) {
-    writeSetting_(db, requests, ALL_PARTICIPANTS + prizeId, input.allParticipants);
+    writeSettings_(db, requests, [[ALL_PARTICIPANTS + prizeId, input.allParticipants]]);
   }
   commit_(db, requests);
   return { id: prizeId };
@@ -465,18 +485,21 @@ function archivePrize_(db, input) {
   if (prize.archived === archived) return { archived };
 
   const requests = [];
-  writeSetting_(db, requests, ARCHIVED_PRIZE + prize.id, archived);
+  writeSettings_(db, requests, [[ARCHIVED_PRIZE + prize.id, archived]]);
   commit_(db, requests);
   return { archived };
 }
 
-function writeSetting_(db, requests, key, value) {
+function writeSettings_(db, requests, values) {
   const settings = db.tabs.SETTINGS;
   const rows = db.data.SETTINGS;
-  const existing = rows.findIndex(([name]) => name === key);
-  const index = existing < 0 ? rows.length : existing;
-  resize_(requests, settings, index + 1, SYSTEM.SETTINGS.length);
-  requests.push(write_(settings.sheetId, index, 0, [[key, value]]));
+  let nextRow = rows.length;
+  const writes = values.map(pair => {
+    const existing = rows.findIndex(([name]) => name === pair[0]);
+    return write_(settings.sheetId, existing < 0 ? nextRow++ : existing, 0, [pair]);
+  });
+  resize_(requests, settings, nextRow, SYSTEM.SETTINGS.length);
+  requests.push(...writes);
 }
 
 function deleteRows_(requests, sheet, indexes) {

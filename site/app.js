@@ -1,8 +1,13 @@
 import { API_URL } from './config.js';
-import { Reel, duration, HOLD, DEFAULT_REVEAL_SECONDS } from './reel.js';
+import { Reel, duration, HOLD, DEFAULT_REVEAL_SECONDS, DEFAULT_NAMES_PER_SECOND } from './reel.js';
 
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat();
+const timingFields = [
+  ['reveal-seconds', 'revealSeconds', DEFAULT_REVEAL_SECONDS],
+  ['names-per-second', 'namesPerSecond', DEFAULT_NAMES_PER_SECOND],
+  ['winner-seconds', 'winnerSeconds', HOLD.standard / 1000]
+];
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const audience = new URLSearchParams(location.hash.slice(1)).get('projector');
 const isProjector = /^[0-9a-f-]{36}$/i.test(audience || '');
@@ -264,6 +269,7 @@ function startOperator() {
       advance: run?.advance || $('advance').value,
       run: run && {
         tx: run.receipt.tx, phase: run.phase, index: run.index, revealed: run.revealed, speed: run.speed, spin: run.spin,
+        namesPerSecond: run.namesPerSecond,
         paused: Boolean(run.pausedAt), elapsed: Math.min(60000, Math.max(0, (run.pausedAt ?? Date.now()) - run.start))
       }
     };
@@ -653,7 +659,7 @@ function startOperator() {
     if (!run.pausedAt && run.phase === 'spin') {
       advanceTimer = setTimeout(land, Math.max(0, run.start + run.spin - Date.now()));
     } else if (!run.pausedAt && run.phase === 'hold' && run.advance === 'auto') {
-      advanceTimer = setTimeout(next, Math.max(0, run.start + HOLD[run.speed] - Date.now()));
+      advanceTimer = setTimeout(next, Math.max(0, run.start + run.hold - Date.now()));
     }
   }
 
@@ -675,10 +681,13 @@ function startOperator() {
 
   function begin(receipt, options = {}) {
     const speed = options.speed || 'standard';
+    const seconds = options.winnerSeconds;
     run = {
       receipt, speed, advance: options.advance || $('advance').value, index: 0,
       phase: 'spin', start: Date.now(),
       spin: duration(speed, reduceMotion.matches, options.revealSeconds ?? state?.revealSeconds),
+      namesPerSecond: options.namesPerSecond,
+      hold: Number.isFinite(seconds) && seconds >= 1 && seconds <= 60 ? Math.round(seconds * 1000) : HOLD[speed],
       pausedAt: null, revealed: 0
     };
     updateReveal('begin');
@@ -688,7 +697,8 @@ function startOperator() {
     if (!offeredDraw || pending()) return;
     commitDraw({
       ...offeredDraw, started: Date.now(), advance: $('advance').value,
-      revealSeconds: state?.revealSeconds ?? DEFAULT_REVEAL_SECONDS
+      revealSeconds: state?.revealSeconds ?? DEFAULT_REVEAL_SECONDS,
+      namesPerSecond: state?.namesPerSecond, winnerSeconds: state?.winnerSeconds
     });
   }
 
@@ -933,22 +943,22 @@ function startOperator() {
     $('name-header').replaceChildren(new Option('Select a column', ''),
       ...state.headers.map(name => new Option(name, name)));
     $('name-header').value = state.nameHeader || '';
-    const revealSeconds = $('reveal-seconds');
-    revealSeconds.value = state.revealSeconds ?? DEFAULT_REVEAL_SECONDS;
-    revealSeconds.disabled = !Number.isFinite(state.revealSeconds);
-    say('reveal-seconds-hint', revealSeconds.disabled
-      ? 'Deploy the updated Apps Script version to set the spin duration.'
-      : 'Sets how long the reel spins before revealing a winner.');
+    for (const [id, key, fallback] of timingFields) {
+      $(id).value = state[key] ?? fallback;
+      $(id).disabled = !Number.isFinite(state[key]);
+    }
+    showMessage('timing-update-hint', timingFields.some(([id]) => $(id).disabled)
+      ? 'Deploy the updated Apps Script version to enable all timing settings.' : '');
     formError($('settings-form'));
     $('settings-dialog').showModal();
   });
   $('settings-form').addEventListener('submit', event => {
     event.preventDefault();
-    const revealSeconds = $('reveal-seconds');
-    saveForm(event.currentTarget, 'settings', {
-      eventName: $('event-name').value, nameHeader: $('name-header').value,
-      ...(!revealSeconds.disabled && { revealSeconds: revealSeconds.valueAsNumber })
-    });
+    const values = { eventName: $('event-name').value, nameHeader: $('name-header').value };
+    for (const [id, key] of timingFields) {
+      if (!$(id).disabled) values[key] = $(id).valueAsNumber;
+    }
+    saveForm(event.currentTarget, 'settings', values);
   });
   $('archived-open').addEventListener('click', () => {
     selectingArchived = false;

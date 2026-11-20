@@ -292,20 +292,26 @@ test('deleting a prize atomically restores its winners and rejects stale confirm
   assert.equal(ok(app.request('state')).prizes.length, 0);
 });
 
-test('event settings persist the Standard reveal duration and validate its range', () => {
+test('event settings persist spin duration, name scroll speed, and winner display time independently', () => {
   const app = fixture();
   app.initialize();
   const settings = { eventName: 'Year End Party', nameHeader: 'Name' };
   assert.equal(ok(app.request('state')).revealSeconds, 4.8);
+  assert.equal(ok(app.request('state')).namesPerSecond, 11);
+  assert.equal(ok(app.request('state')).winnerSeconds, 1.8);
   for (const revealSeconds of [0, 60.1, 4.85, '8', null]) {
     assert.equal(app.request('settings', { ...settings, revealSeconds }).code, 'VALIDATION');
   }
+  assert.equal(app.request('settings', { ...settings, revealSeconds: 20, namesPerSecond: 31 }).code, 'VALIDATION');
+  assert.equal(app.request('settings', { ...settings, winnerSeconds: 4.85 }).code, 'VALIDATION');
   assert.equal(ok(app.request('state')).eventName, 'Raffle Draw');
-  ok(app.request('settings', { ...settings, revealSeconds: 8.5 }));
+  ok(app.request('settings', { ...settings, revealSeconds: 8.5, namesPerSecond: 7, winnerSeconds: 5.5 }));
   ok(app.request('settings', settings));
   assert.equal(ok(app.request('state')).revealSeconds, 8.5);
   ok(app.request('settings', { ...settings, revealSeconds: 60 }));
   assert.equal(ok(app.request('state')).revealSeconds, 60);
+  assert.equal(ok(app.request('state')).namesPerSecond, 7);
+  assert.equal(ok(app.request('state')).winnerSeconds, 5.5);
   assert.equal(duration('standard', false, 8.5), 8500);
   assert.equal(duration('fast', false, 60), 1650);
   assert.equal(duration('standard', true, 60), 0);
@@ -329,10 +335,11 @@ test('projector sync shares selections and committed draw progress across operat
   assert.equal(app.writes(), sheetsWrites);
 
   const tx = randomUUID();
-  const run = { tx, phase: 'spin', index: 0, revealed: 0, elapsed: 0, speed: 'standard', spin: 60000, paused: false };
+  const run = { tx, phase: 'spin', index: 0, revealed: 0, elapsed: 0, speed: 'standard', spin: 60000, namesPerSecond: 7, paused: false };
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, false);
   const receipt = ok(app.request('draw', { tx, prizeId }));
   assert.equal(app.request('publishPresentation', { ...screen, kind: 'begin', run: { ...run, spin: 60001 } }).code, 'VALIDATION');
+  assert.equal(app.request('publishPresentation', { ...screen, kind: 'begin', run: { ...run, namesPerSecond: 0 } }).code, 'VALIDATION');
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, true);
   const hold = { ...run, phase: 'hold', revealed: 1 };
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'continue', run: hold })).published, true);
@@ -340,6 +347,7 @@ test('projector sync shares selections and committed draw progress across operat
   assert.equal(current.run.phase, 'hold');
   assert.equal(current.run.tx, tx);
   assert.equal(current.run.spin, 60000);
+  assert.equal(current.run.namesPerSecond, 7);
   assert.equal(current.run.winners, undefined);
   assert.deepEqual(ok(app.request('receipt', { tx })).winners, receipt.winners);
 
@@ -453,4 +461,12 @@ test('the reel recycles seven rows and keeps the exact committed winner at cente
   reel.show({ ...run, index: 1, phase: 'complete' }, 5000);
   assert.equal(reel.rows[3].textContent, 'Committed second');
   assert.equal(reel.el.dataset.phase, 'landed');
+
+  const custom = { ...run, speed: 'standard', spin: 20000, namesPerSecond: 4 };
+  reel.show(custom, 11000);
+  assert.equal(reel.rows.find(row => row.dataset.center === 'true').textContent, 'Eligible 40');
+  reel.show({ ...custom, namesPerSecond: 8 }, 11000);
+  assert.equal(reel.rows.find(row => row.dataset.center === 'true').textContent, 'Eligible 80');
+  reel.show({ ...custom, phase: 'hold' }, 21000);
+  assert.equal(reel.rows[3].textContent, 'Committed first');
 });

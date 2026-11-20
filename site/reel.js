@@ -1,5 +1,6 @@
 export const HOLD = { standard: 1800, fast: 900 };
 export const DEFAULT_REVEAL_SECONDS = 4.8;
+export const DEFAULT_NAMES_PER_SECOND = 11;
 
 export function duration(speed, reduced, seconds = DEFAULT_REVEAL_SECONDS) {
   if (reduced) return 0;
@@ -39,13 +40,15 @@ export class Reel {
   }
 
   show(run, now) {
-    const { receipt, index, phase, start, spin, pausedAt, speed } = run;
+    const { receipt, index, phase, start, spin, pausedAt, speed, namesPerSecond } = run;
     if (phase === 'summary') {
       this.idle('Draw complete', 'summary');
       return;
     }
     const pool = receipt.names.length ? receipt.names : receipt.winners;
-    const steps = speed === 'fast' ? 21 : 52;
+    const steps = Number.isInteger(namesPerSecond) && namesPerSecond >= 1 && namesPerSecond <= 30
+      ? Math.max(1, Math.round(spin * namesPerSecond / 1000))
+      : speed === 'fast' ? 21 : 52;
     const atRest = phase === 'hold' || phase === 'complete';
     const travelled = atRest || spin === 0 ? steps : positionAt(((pausedAt ?? now) - start) / spin, steps);
     const base = Math.floor(travelled);
