@@ -106,6 +106,7 @@ function startOperator() {
   let mutation = false;
   let selected = '';
   let editingPrize = '';
+  let resetRequest = null;
   let limit = 30;
   let run = null;
   let offeredDraw = null;
@@ -237,9 +238,15 @@ function startOperator() {
 
   function renderDashboard() {
     const prizes = state?.prizes || [];
-    if (!prizes.some(prize => prize.id === selected)) selected = prizes.find(prize => prize.remaining)?.id || prizes[0]?.id || '';
+    if (!prizes.some(prize => prize.id === selected && prize.remaining)) selected = prizes.find(prize => prize.remaining)?.id || '';
     const selector = $('prize-select');
-    selector.replaceChildren(new Option(prizes.length ? 'Select a prize' : 'No prizes yet', ''), ...prizes.map(prize => new Option(prize.name, prize.id)));
+    selector.replaceChildren(new Option(prizes.length ? 'Select a prize' : 'No prizes yet', ''), ...prizes.map(prize => {
+      const complete = !prize.remaining;
+      const label = complete ? prize.name + ' · Complete (' + number.format(prize.won) + '/' + number.format(prize.limit) + ')' : prize.name;
+      const option = new Option(label, prize.id);
+      option.disabled = complete;
+      return option;
+    }));
     selector.value = selected;
     say('event', state?.eventName || 'Raffle Draw');
     for (const key of ['total', 'eligible', 'won']) say(key, state ? number.format(state[key]) : '—');
@@ -247,6 +254,10 @@ function startOperator() {
     $('prize-add').disabled = !state || mutation;
     $('refresh').disabled = !token;
     $('search').disabled = !state;
+    const latestDraws = new Map();
+    for (const winner of state?.history || []) {
+      if (!latestDraws.has(winner.prizeId)) latestDraws.set(winner.prizeId, winner.tx);
+    }
     $('prizes').replaceChildren(...prizes.map(prize => {
       const row = document.createElement('tr');
       const progress = document.createElement('progress');
@@ -260,8 +271,28 @@ function startOperator() {
       edit.disabled = mutation;
       edit.setAttribute('aria-label', 'Edit ' + prize.name);
       edit.addEventListener('click', () => openPrize(prize));
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.className = 'reset-prize';
+      reset.title = 'Reset ' + prize.name;
+      reset.setAttribute('aria-label', reset.title);
+      const throughTx = latestDraws.get(prize.id) || '';
+      reset.dataset.throughTx = throughTx;
+      reset.addEventListener('click', () => {
+        if (!throughTx || mutation || active() || pending()) return;
+        resetRequest = { prizeId: prize.id, throughTx };
+        const winners = number.format(prize.won) + (prize.won === 1 ? ' winner' : ' winners');
+        say('reset-warning', 'Resetting “' + prize.name + '” returns ' + winners +
+          ' to ALL IMS and removes their wins for this prize from Winner history. They can enter future draws again.');
+        formError($('reset-form'));
+        $('reset-dialog').showModal();
+        renderControls();
+      });
       const actions = document.createElement('td');
-      actions.append(edit);
+      const buttons = document.createElement('div');
+      buttons.className = 'prize-actions';
+      buttons.append(edit, reset);
+      actions.append(buttons);
       row.append(node('td', prize.name), awarded, node('td', number.format(prize.perDraw)),
         node('td', number.format(prize.remaining)), node('td', prize.remaining ? 'Open' : 'Complete'), actions);
       return row;
@@ -283,16 +314,20 @@ function startOperator() {
     const prize = state?.prizes.find(item => item.id === selected);
     const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, state?.eligible || 0);
     const waiting = token && pending();
+    const confirming = $('disconnect-dialog').open || $('reset-dialog').open;
     $('prize-select').disabled = !state?.prizes.length || mutation || !!active();
-    $('draw').disabled = !token || !count || !!active() || mutation || !!waiting || !!state?.invalid || !!state?.excluded;
+    $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting || !!state?.invalid || !!state?.excluded;
     if ($('draw').disabled) offeredDraw = null;
     else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
     say('draw', mutation ? 'Saving…' : count ? 'Draw ' + number.format(count) + (count === 1 ? ' winner' : ' winners') : 'Draw winners');
-    say('slots', prize ? number.format(prize.remaining) + ' winning slots remaining' : state ? 'Choose an available prize.' : 'Connect to load your prizes.');
+    say('slots', prize ? number.format(prize.remaining) + ' winning slots remaining' :
+      !state ? 'Connect to load your prizes.' :
+        state.prizes.length && state.prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
     $('retry').hidden = !waiting;
     $('retry').disabled = mutation || !!active();
-    $('replay').hidden = !state?.lastDraw || !!active() || !!waiting;
-    $('replay').disabled = mutation;
+    for (const button of document.querySelectorAll('.reset-prize')) {
+      button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
+    }
     $('reveal-actions').hidden = !active();
     $('pause').disabled = !active() || (run.phase === 'hold' && run.advance === 'manual');
     $('skip').disabled = !active() || run.phase !== 'spin';
@@ -400,17 +435,20 @@ function startOperator() {
     output.hidden = !message;
   }
 
-  async function saveForm(form, action, values) {
+  async function saveForm(form, action, values, onSave) {
     if (mutation) return;
     mutation = true;
     refreshSequence++;
     formError(form);
-    const submit = form.querySelector('.primary');
+    const submit = form.querySelector('button[type="submit"], button.primary');
+    const cancel = form.querySelector('[data-close]');
     submit.disabled = true;
+    cancel.disabled = true;
     renderControls();
     try {
       const result = await api(action, values);
       if (result.id) selected = result.id;
+      onSave?.();
       form.closest('dialog').close();
       showMessage('issue');
       await refresh(true);
@@ -419,6 +457,7 @@ function startOperator() {
     } finally {
       mutation = false;
       submit.disabled = false;
+      cancel.disabled = false;
       renderDashboard();
     }
   }
@@ -426,6 +465,12 @@ function startOperator() {
   for (const button of document.querySelectorAll('[data-close]')) {
     button.addEventListener('click', () => button.closest('dialog').close());
   }
+  for (const dialog of [$('disconnect-dialog'), $('reset-dialog')]) {
+    dialog.addEventListener('close', renderControls);
+  }
+  $('reset-dialog').addEventListener('cancel', event => {
+    if (mutation) event.preventDefault();
+  });
   function updateNavigation() {
     const locationHash = location.hash || '#draw-section';
     for (const link of navLinks) {
@@ -438,24 +483,30 @@ function startOperator() {
   $('connection').addEventListener('click', () => {
     if (token) {
       if (mutation) return;
-      token = '';
-      refreshSequence++;
-      state = null;
-      run = null;
-      clearTimeout(advanceTimer);
-      cancelAnimationFrame(frame);
-      renderResults('operator-results', null);
-      connectionStatus('Disconnected', 'idle');
-      say('connection', 'Connect');
-      say('updated', 'Google Sheets');
-      showMessage('issue');
-      renderDashboard();
+      $('disconnect-dialog').showModal();
+      renderControls();
       return;
     }
     $('endpoint').value = endpoint;
     $('token').value = '';
     showMessage('connect-error');
     $('connect-dialog').showModal();
+  });
+  $('disconnect-confirm').addEventListener('click', () => {
+    if (mutation) return;
+    token = '';
+    refreshSequence++;
+    state = null;
+    run = null;
+    clearTimeout(advanceTimer);
+    cancelAnimationFrame(frame);
+    renderResults('operator-results', null);
+    connectionStatus('Disconnected', 'idle');
+    say('connection', 'Connect');
+    say('updated', 'Google Sheets');
+    showMessage('issue');
+    $('disconnect-dialog').close();
+    renderDashboard();
   });
   $('connect-form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -500,6 +551,18 @@ function startOperator() {
       id: editingPrize, name: $('prize-name').value, limit: $('prize-limit').valueAsNumber, perDraw: $('prize-count').valueAsNumber
     });
   });
+  $('reset-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!resetRequest || active() || pending()) return;
+    const request = resetRequest;
+    saveForm(event.currentTarget, 'resetPrize', request, () => {
+      if (run?.receipt.prizeId === request.prizeId) {
+        run = null;
+        renderResults('operator-results', null);
+      }
+      selected = request.prizeId;
+    });
+  });
   $('prize-select').addEventListener('change', () => {
     selected = $('prize-select').value;
     if (run && !active()) {
@@ -510,15 +573,6 @@ function startOperator() {
   });
   $('draw').addEventListener('click', startDraw);
   $('retry').addEventListener('click', () => commitDraw(pending()));
-  $('replay').addEventListener('click', async () => {
-    if (!state?.lastDraw || mutation || active()) return;
-    mutation = true;
-    renderControls();
-    showMessage('issue');
-    try { begin(await api('receipt', { tx: state.lastDraw.tx })); }
-    catch (error) { showMessage('issue', error.message); }
-    finally { mutation = false; renderControls(); }
-  });
   $('pause').addEventListener('click', () => {
     if (!active()) return;
     const now = Date.now();

@@ -59,7 +59,6 @@
               <button id="all" type="button">Reveal all</button>
             </div>
             <button id="retry" type="button" hidden>Retry pending draw</button>
-            <button id="replay" class="quiet" type="button" hidden>Replay latest draw</button>
           </div>
         </div>
         <ol id="operator-results" aria-label="Revealed winners" class="results" hidden></ol>
@@ -100,6 +99,25 @@
     </div>
     <ol id="projector-results" aria-label="Revealed winners" class="results" hidden></ol>
   </main>
+  <dialog id="disconnect-dialog" aria-labelledby="disconnect-heading" aria-describedby="disconnect-warning">
+    <h2 id="disconnect-heading">Disconnect from Google Sheets?</h2>
+    <p class="dialog-copy" id="disconnect-warning">This ends the current dashboard session and clears the projector. Saved winners stay in Google Sheets. You’ll need the administrator key to reconnect.</p>
+    <div class="dialog-actions">
+      <button type="button" data-close autofocus>Cancel</button>
+      <button id="disconnect-confirm" class="danger" type="button">Disconnect</button>
+    </div>
+  </dialog>
+  <dialog id="reset-dialog" aria-labelledby="reset-heading" aria-describedby="reset-warning">
+    <form id="reset-form">
+      <h2 id="reset-heading">Reset prize?</h2>
+      <p class="dialog-copy" id="reset-warning"></p>
+      <p class="error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" data-close autofocus>Cancel</button>
+        <button class="danger" type="submit">Reset prize</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="connect-dialog" aria-labelledby="connect-heading">
     <form id="connect-form">
       <h2 id="connect-heading">Connect to Google Sheets</h2>

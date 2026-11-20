@@ -70,9 +70,11 @@ export function fixture(defaultRows = []) {
         }
       } else if (type === 'copyPaste') {
         const { source: s, destination: d } = body;
-        const data = next.get(s.sheetId).rows[s.startRowIndex];
-        set(next.get(d.sheetId).rows, d.startRowIndex, d.startColumnIndex,
-          Array.from({ length: s.endColumnIndex - s.startColumnIndex }, (_, i) => data?.[s.startColumnIndex + i]));
+        for (let offset = 0; offset < s.endRowIndex - s.startRowIndex; offset++) {
+          const data = next.get(s.sheetId).rows[s.startRowIndex + offset];
+          set(next.get(d.sheetId).rows, d.startRowIndex + offset, d.startColumnIndex,
+            Array.from({ length: s.endColumnIndex - s.startColumnIndex }, (_, i) => data?.[s.startColumnIndex + i]));
+        }
       } else if (type === 'deleteDimension') {
         const { sheetId, startIndex, endIndex } = body.range;
         const sheet = next.get(sheetId);

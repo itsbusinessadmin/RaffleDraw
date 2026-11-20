@@ -107,6 +107,52 @@ test('duplicate identifiers and re-imported winner records block unsafe draws', 
   app.loadRoster([['Name', 'Participant ID'], ['One', 'X'], ['Two', 'Y']]);
   assert.equal(ok(app.request('state')).excluded, 1);
   assert.equal(app.request('draw', { tx: randomUUID(), prizeId }).code, 'VALIDATION');
+  const throughTx = ok(app.request('state')).lastDraw.tx;
+  assert.equal(app.request('resetPrize', { prizeId, throughTx }).code, 'INTEGRITY');
+  assert.deepEqual(app.data('One Prize').slice(1), [['One', 'X']]);
+});
+
+test('prize reset restores whole records and preserves other awards and transaction safety', () => {
+  const app = fixture();
+  app.initialize();
+  const entrants = [['Name', 'Participant ID', 'Level'], ['Same name', '001', 0],
+    ['Same name', '002', false], ['Three', '003', 3], ['Four', '004', 4], ['Five', '005', 5]];
+  app.loadRoster(entrants);
+  const prizeId = ok(app.request('prize', { name: 'Grand Prize', limit: 3, perDraw: 2 })).id;
+  const otherId = ok(app.request('prize', { name: 'Other Prize', limit: 1, perDraw: 1 })).id;
+  const first = { tx: randomUUID(), prizeId };
+  const other = { tx: randomUUID(), prizeId: otherId };
+  const last = { tx: randomUUID(), prizeId };
+  for (const draw of [first, other, last]) ok(app.request('draw', draw));
+  const reset = { prizeId, throughTx: last.tx };
+  const otherRecords = app.data('Other Prize');
+  const prizeRecords = app.data('Grand Prize');
+  const rosterBeforeReset = app.data('ALL IMS');
+  assert.equal(app.request('resetPrize', reset, 'wrong').code, 'UNAUTHORIZED');
+  assert.equal(app.request('resetPrize', { ...reset, throughTx: first.tx }).code, 'CONFLICT');
+  app.fail('before');
+  assert.equal(app.request('resetPrize', reset).code, 'BACKEND_ERROR');
+  assert.deepEqual(app.data('ALL IMS'), rosterBeforeReset);
+  assert.deepEqual(app.data('Grand Prize'), prizeRecords);
+  assert.equal(ok(app.request('state')).won, 4);
+  app.fail('after');
+  assert.equal(app.request('resetPrize', reset).code, 'BACKEND_ERROR');
+  const writes = app.writes();
+  assert.equal(ok(app.request('resetPrize', reset)).restored, 0);
+  assert.equal(app.writes(), writes);
+  assert.deepEqual(app.data('ALL IMS'), [...rosterBeforeReset, ...prizeRecords.slice(1)]);
+  assert.deepEqual(app.data('Grand Prize'), [entrants[0]]);
+  assert.deepEqual(app.data('Other Prize'), otherRecords);
+  assert.equal(app.request('draw', first).code, 'CONFLICT');
+  assert.equal(app.request('receipt', { tx: last.tx }).code, 'NOT_FOUND');
+  const state = ok(app.request('state'));
+  assert.deepEqual([state.eligible, state.won, state.lastDraw.tx], [4, 1, other.tx]);
+  assert.deepEqual(state.history.map(winner => winner.prizeId), [otherId]);
+  assert.equal(state.prizes.find(prize => prize.id === prizeId).remaining, 3);
+  const fresh = { tx: randomUUID(), prizeId };
+  ok(app.request('draw', fresh));
+  assert.equal(ok(app.request('resetPrize', reset)).restored, 0);
+  assert.equal(ok(app.request('receipt', { tx: fresh.tx })).count, 2);
 });
 
 test('the reel starts slowly, accelerates, slows again and settles exactly', () => {

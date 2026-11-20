@@ -16,6 +16,8 @@
   --accent: #5a35ab;
   --accent-strong: #482588;
   --accent-soft: #eee8fa;
+  --danger: #9e303b;
+  --danger-soft: #fae8eb;
   --stage: #21143d;
   --stage-muted: #d0bfed;
   --radius: 14px;
@@ -88,6 +90,20 @@ button.primary:disabled {
   border-color: var(--accent-soft);
   color: #655085;
 }
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--white);
+}
+button.danger:hover:not(:disabled) {
+  background: #802630;
+  border-color: #802630;
+}
+button.danger:disabled {
+  background: var(--danger-soft);
+  border-color: var(--danger-soft);
+  color: var(--danger);
+}
 button.quiet {
   background: transparent;
   border-color: transparent;
@@ -114,6 +130,34 @@ select {
     calc(100% - 10px) 51%;
   background-size: 5px 5px;
   background-repeat: no-repeat;
+}
+#prize-select option:disabled {
+  color: var(--danger);
+  background-color: var(--danger-soft);
+}
+@supports (appearance: base-select) and selector(::picker(select)) {
+  #prize-select,
+  #prize-select::picker(select) {
+    appearance: base-select;
+  }
+  #prize-select {
+    align-items: center;
+    padding-inline: 12px;
+    background-image: none;
+  }
+  #prize-select::picker(select) {
+    margin-top: 4px;
+    border: 1px solid var(--field-line);
+    border-radius: 8px;
+    background: var(--white);
+  }
+  #prize-select option {
+    padding: 9px 12px;
+    overflow-wrap: anywhere;
+  }
+  #prize-select option:disabled {
+    opacity: 1;
+  }
 }
 h1,
 h2,
@@ -482,13 +526,11 @@ footer {
   margin-top: 9px;
 }
 .reveal-actions button,
-#retry,
-#replay {
+#retry {
   min-height: 34px;
   font-size: 0.8125rem;
 }
-#retry,
-#replay {
+#retry {
   margin-top: 7px;
 }
 .metrics {
@@ -571,6 +613,41 @@ td:first-child {
 #prizes td:last-child {
   text-align: right;
 }
+.prize-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.reset-prize {
+  display: grid;
+  flex: 0 0 34px;
+  place-items: center;
+  position: relative;
+  padding: 0;
+  color: var(--danger);
+}
+.reset-prize:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.reset-prize::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+.reset-prize::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 9px;
+  width: 5px;
+  height: 5px;
+  border-left: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+}
 td:last-child button {
   min-height: 32px;
 }
@@ -620,6 +697,11 @@ dialog::backdrop {
 }
 dialog h2 {
   margin-bottom: 19px;
+}
+.dialog-copy {
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 dialog label:not(:first-child) {
   margin-top: 13px;
