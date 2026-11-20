@@ -292,6 +292,25 @@ test('deleting a prize atomically restores its winners and rejects stale confirm
   assert.equal(ok(app.request('state')).prizes.length, 0);
 });
 
+test('event settings persist the Standard reveal duration and validate its range', () => {
+  const app = fixture();
+  app.initialize();
+  const settings = { eventName: 'Year End Party', nameHeader: 'Name' };
+  assert.equal(ok(app.request('state')).revealSeconds, 4.8);
+  for (const revealSeconds of [0, 60.1, 4.85, '8', null]) {
+    assert.equal(app.request('settings', { ...settings, revealSeconds }).code, 'VALIDATION');
+  }
+  assert.equal(ok(app.request('state')).eventName, 'Raffle Draw');
+  ok(app.request('settings', { ...settings, revealSeconds: 8.5 }));
+  ok(app.request('settings', settings));
+  assert.equal(ok(app.request('state')).revealSeconds, 8.5);
+  ok(app.request('settings', { ...settings, revealSeconds: 60 }));
+  assert.equal(ok(app.request('state')).revealSeconds, 60);
+  assert.equal(duration('standard', false, 8.5), 8500);
+  assert.equal(duration('fast', false, 60), 1650);
+  assert.equal(duration('standard', true, 60), 0);
+});
+
 test('projector sync shares selections and committed draw progress across operators', () => {
   const app = fixture();
   app.initialize();
@@ -310,15 +329,17 @@ test('projector sync shares selections and committed draw progress across operat
   assert.equal(app.writes(), sheetsWrites);
 
   const tx = randomUUID();
-  const run = { tx, phase: 'spin', index: 0, revealed: 0, elapsed: 0, speed: 'fast', spin: 1650, paused: false };
+  const run = { tx, phase: 'spin', index: 0, revealed: 0, elapsed: 0, speed: 'standard', spin: 60000, paused: false };
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, false);
   const receipt = ok(app.request('draw', { tx, prizeId }));
+  assert.equal(app.request('publishPresentation', { ...screen, kind: 'begin', run: { ...run, spin: 60001 } }).code, 'VALIDATION');
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'begin', run })).published, true);
   const hold = { ...run, phase: 'hold', revealed: 1 };
   assert.equal(ok(app.request('publishPresentation', { ...screen, kind: 'continue', run: hold })).published, true);
   const current = ok(app.request('presentation')).snapshot;
   assert.equal(current.run.phase, 'hold');
   assert.equal(current.run.tx, tx);
+  assert.equal(current.run.spin, 60000);
   assert.equal(current.run.winners, undefined);
   assert.deepEqual(ok(app.request('receipt', { tx })).winners, receipt.winners);
 

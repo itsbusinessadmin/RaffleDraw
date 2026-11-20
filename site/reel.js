@@ -1,5 +1,12 @@
 export const HOLD = { standard: 1800, fast: 900 };
-export const duration = (speed, reduced) => reduced ? 0 : speed === 'fast' ? 1650 : 4800;
+export const DEFAULT_REVEAL_SECONDS = 4.8;
+
+export function duration(speed, reduced, seconds = DEFAULT_REVEAL_SECONDS) {
+  if (reduced) return 0;
+  if (speed === 'fast') return 1650;
+  const standard = Number.isFinite(seconds) && seconds >= 1 && seconds <= 60 ? seconds : DEFAULT_REVEAL_SECONDS;
+  return Math.round(standard * 1000);
+}
 
 // Normalized integral of a half-sine velocity profile: rest → peak → rest.
 export function positionAt(progress, steps) {

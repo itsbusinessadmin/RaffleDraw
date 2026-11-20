@@ -4,6 +4,8 @@ const ID_HEADER = 'Participant ID';
 const GUARD = 'RAFFLE_WRITE_VERSION';
 const ARCHIVED_PRIZE = 'archivedPrize:';
 const ALL_PARTICIPANTS = 'allParticipants:';
+const DEFAULT_REVEAL_SECONDS = 4.8;
+const MAX_REVEAL_SECONDS = 60;
 const SYSTEM = {
   SETTINGS: ['key', 'value'],
   PRIZES: ['prizeId', 'sheetId', 'name', 'limit', 'perDraw', 'createdAt'],
@@ -104,7 +106,7 @@ function publishPresentation_(cfg, input) {
         !Number.isSafeInteger(index) || index < 0 || index >= 1000 ||
         !Number.isSafeInteger(revealed) || revealed < 0 || revealed > 1000 ||
         !Number.isSafeInteger(elapsed) || elapsed < 0 || elapsed > 60000 ||
-        !Number.isSafeInteger(spin) || spin < 0 || spin > 6000 ||
+        !Number.isSafeInteger(spin) || spin < 0 || spin > MAX_REVEAL_SECONDS * 1000 ||
         !['standard', 'fast'].includes(speed) || typeof paused !== 'boolean') fail_('VALIDATION', 'Invalid projector reveal.');
     if (kind === 'begin') {
       const history = rows_(cfg.id, ['DRAW_HISTORY']).DRAW_HISTORY;
@@ -337,7 +339,9 @@ function database_(id) {
     fail_('INTEGRITY', 'Prize identifiers and the winner ledger disagree.');
   }
   return { id, tabs, guard, source, bookSheets: book.sheets, data, headers, rawHeaders, nameHeader, idColumn, eligible, invalid, excluded, history,
-    winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds, eventName: String(data.SETTINGS[1][1] || 'Raffle Draw') };
+    winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds,
+    revealSeconds: validRevealSeconds_(settings.get('revealSeconds')) ? settings.get('revealSeconds') : DEFAULT_REVEAL_SECONDS,
+    eventName: String(data.SETTINGS[1][1] || 'Raffle Draw') };
 }
 
 function dispatch_(cfg, input) {
@@ -376,7 +380,7 @@ function state_(db) {
   const byTx = new Map(db.history.map(draw => [draw.tx, draw]));
   return {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
-    presentationSync: true, allParticipantsMode: true,
+    presentationSync: true, allParticipantsMode: true, revealSeconds: db.revealSeconds,
     total: db.eligible.length + db.invalid + db.winsByParticipant.size, eligible: db.eligible.length, won: db.winsByParticipant.size,
     invalid: db.invalid, excluded: db.excluded, prizes: db.prizes, lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {
@@ -386,13 +390,24 @@ function state_(db) {
   };
 }
 
+function validRevealSeconds_(value) {
+  return Number.isFinite(value) && value >= 1 && value <= MAX_REVEAL_SECONDS && Math.round(value * 10) / 10 === value;
+}
+
 function saveSettings_(db, input) {
   const name = typeof input.eventName === 'string' ? input.eventName.trim() : '';
   if (!name || name.length > 120) fail_('VALIDATION', 'Enter an event name of 1–120 characters.');
   if (!db.headers.includes(input.nameHeader) || !input.nameHeader || input.nameHeader === ID_HEADER) {
     fail_('VALIDATION', 'Select an existing participant name column.');
   }
-  commit_(db, [write_(db.tabs.SETTINGS.sheetId, 1, 0, [['eventName', name], ['nameHeader', input.nameHeader]])]);
+  const requests = [write_(db.tabs.SETTINGS.sheetId, 1, 0, [['eventName', name], ['nameHeader', input.nameHeader]])];
+  if (input.revealSeconds !== undefined) {
+    if (!validRevealSeconds_(input.revealSeconds)) {
+      fail_('VALIDATION', 'Enter a reveal speed from 1 to 60 seconds with up to one decimal place.');
+    }
+    writeSetting_(db, requests, 'revealSeconds', input.revealSeconds);
+  }
+  commit_(db, requests);
   return { saved: true };
 }
 
@@ -431,7 +446,7 @@ function savePrize_(db, input) {
   resize_(requests, ledger, row + 1, SYSTEM.PRIZES.length);
   requests.push(write_(ledger.sheetId, row, 0, [[prizeId, sheetId, name, limit, perDraw, current?.at || new Date().toISOString()]]));
   if (input.allParticipants !== undefined && input.allParticipants !== (current?.allParticipants ?? false)) {
-    writePrizeSetting_(db, requests, ALL_PARTICIPANTS + prizeId, input.allParticipants);
+    writeSetting_(db, requests, ALL_PARTICIPANTS + prizeId, input.allParticipants);
   }
   commit_(db, requests);
   return { id: prizeId };
@@ -450,12 +465,12 @@ function archivePrize_(db, input) {
   if (prize.archived === archived) return { archived };
 
   const requests = [];
-  writePrizeSetting_(db, requests, ARCHIVED_PRIZE + prize.id, archived);
+  writeSetting_(db, requests, ARCHIVED_PRIZE + prize.id, archived);
   commit_(db, requests);
   return { archived };
 }
 
-function writePrizeSetting_(db, requests, key, value) {
+function writeSetting_(db, requests, key, value) {
   const settings = db.tabs.SETTINGS;
   const rows = db.data.SETTINGS;
   const existing = rows.findIndex(([name]) => name === key);

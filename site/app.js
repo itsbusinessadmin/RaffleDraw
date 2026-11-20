@@ -1,5 +1,5 @@
 import { API_URL } from './config.js';
-import { Reel, duration, HOLD } from './reel.js';
+import { Reel, duration, HOLD, DEFAULT_REVEAL_SECONDS } from './reel.js';
 
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat();
@@ -677,14 +677,19 @@ function startOperator() {
     const speed = options.speed || $('speed').value;
     run = {
       receipt, speed, advance: options.advance || $('advance').value, index: 0,
-      phase: 'spin', start: Date.now(), spin: duration(speed, reduceMotion.matches), pausedAt: null, revealed: 0
+      phase: 'spin', start: Date.now(),
+      spin: duration(speed, reduceMotion.matches, options.revealSeconds ?? state?.revealSeconds),
+      pausedAt: null, revealed: 0
     };
     updateReveal('begin');
   }
 
   function startDraw() {
     if (!offeredDraw || pending()) return;
-    commitDraw({ ...offeredDraw, started: Date.now(), speed: $('speed').value, advance: $('advance').value });
+    commitDraw({
+      ...offeredDraw, started: Date.now(), speed: $('speed').value, advance: $('advance').value,
+      revealSeconds: state?.revealSeconds ?? DEFAULT_REVEAL_SECONDS
+    });
   }
 
   async function commitDraw(request) {
@@ -928,12 +933,22 @@ function startOperator() {
     $('name-header').replaceChildren(new Option('Select a column', ''),
       ...state.headers.map(name => new Option(name, name)));
     $('name-header').value = state.nameHeader || '';
+    const revealSeconds = $('reveal-seconds');
+    revealSeconds.value = state.revealSeconds ?? DEFAULT_REVEAL_SECONDS;
+    revealSeconds.disabled = !Number.isFinite(state.revealSeconds);
+    say('reveal-seconds-hint', revealSeconds.disabled
+      ? 'Deploy the updated Apps Script version to set the spin duration.'
+      : 'Sets the Standard spin duration. Fast uses its preset.');
     formError($('settings-form'));
     $('settings-dialog').showModal();
   });
   $('settings-form').addEventListener('submit', event => {
     event.preventDefault();
-    saveForm(event.currentTarget, 'settings', { eventName: $('event-name').value, nameHeader: $('name-header').value });
+    const revealSeconds = $('reveal-seconds');
+    saveForm(event.currentTarget, 'settings', {
+      eventName: $('event-name').value, nameHeader: $('name-header').value,
+      ...(!revealSeconds.disabled && { revealSeconds: revealSeconds.valueAsNumber })
+    });
   });
   $('archived-open').addEventListener('click', () => {
     selectingArchived = false;
