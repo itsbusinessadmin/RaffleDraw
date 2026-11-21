@@ -33,6 +33,10 @@ function node(tag, label) {
   return element;
 }
 
+function isDesignated(run, position = run?.index + 1) {
+  return run?.receipt.designated?.includes(position) === true;
+}
+
 function renderResults(id, run) {
   const list = $(id);
   const count = run?.revealed ?? 0;
@@ -98,9 +102,9 @@ if (isProjector) {
     redrawButton.title = live.canRedraw ? '' : 'Available while a winner is on the ticket.';
     if (live.redrawPrompt && document.fullscreenElement === projector) {
       if (!redrawDialog.open) {
-        redrawWinner.replaceChildren(...run.receipt.winners.slice(0, run.revealed).map((name, index) =>
-          new Option((index + 1) + '. ' + name, String(index + 1))));
-        redrawWinner.value = String(run.index + 1);
+        redrawWinner.replaceChildren(...run.receipt.winners.slice(0, run.revealed).flatMap((name, index) =>
+          isDesignated(run, index + 1) ? [] : [new Option((index + 1) + '. ' + name, String(index + 1))]));
+        redrawWinner.value = isDesignated(run) ? redrawWinner.options[redrawWinner.options.length - 1]?.value : String(run.index + 1);
       }
       if (live.redrawPending) redrawWinner.value = String(live.redrawPending);
       redrawWinner.disabled = !!(live.redrawBusy || live.redrawPending);
@@ -213,6 +217,9 @@ function startOperator() {
   let state = null;
   let updating = 0;
   let refreshSequence = 0;
+  let refreshClicks = 0;
+  let lastRefreshClick = 0;
+  let designatedVerified = '';
   let syncError = '';
   let mutation = false;
   let selected = '';
@@ -389,7 +396,7 @@ function startOperator() {
           return null;
         });
         if (receipt && receipt.redrawTx !== details.redrawTx) return;
-        if (receipt && !receipt.designated?.length && details.index < receipt.count && details.revealed <= receipt.count) {
+        if (receipt && details.index < receipt.count && details.revealed <= receipt.count) {
           const localTime = Date.now();
           const age = details.paused ? 0 : Math.max(0, now - snapshot.updatedAt);
           remoteRun = {
@@ -451,8 +458,8 @@ function startOperator() {
         return;
       }
       const position = retry?.position ?? message.position;
-      if (!Number.isSafeInteger(position) || position < 1 || position > run.revealed) {
-        redrawError = 'Choose a revealed winner to replace.';
+      if (!Number.isSafeInteger(position) || position < 1 || position > run.revealed || isDesignated(run, position)) {
+        redrawError = 'Choose a revealed random winner to replace.';
         publish();
         return;
       }
@@ -470,6 +477,7 @@ function startOperator() {
     connectionStatus('Sheets connected', 'connected');
     say('updated', 'Last synced ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
     renderDashboard();
+    if ($('designated-dialog').open) renderDesignated();
     if ($('prize-dialog').open) renderPrizeParticipants();
   }
 
@@ -687,11 +695,14 @@ function startOperator() {
   }
 
   function canPromptRedraw() {
-    return !!token && run?.phase === 'hold' && !run.pausedAt && !mutation && !requiresDrawApiUpdate();
+    return !!token && run?.phase === 'hold' && !run.pausedAt && !mutation &&
+      run.revealed > (run.receipt.designated?.filter(position => position <= run.revealed).length ?? 0);
   }
 
   function requiresDrawApiUpdate() {
-    return Array.isArray(state?.designatedAwards);
+    // This build supports hidden admin assignments, so a designatedAwards
+    // list from the backend does not block draws.
+    return false;
   }
 
   function pendingRedraw() {
@@ -723,12 +734,12 @@ function startOperator() {
     const prizes = state?.prizes.filter(item => !item.archived) || [];
     const prize = prizes.find(item => item.id === selected);
     const eligible = prize?.eligible ?? state?.eligible ?? 0;
-    const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, eligible);
+    const count = prize?.drawCount ?? Math.min(prize?.perDraw || 0, prize?.remaining || 0, eligible);
     const waiting = token && pending();
     const confirming = $('disconnect-dialog').open || $('reset-dialog').open || $('bulk-dialog').open || $('archived-dialog').open;
     $('prize-select').disabled = !prizes.length || mutation || !!active();
     $('prizes-select-mode').disabled = mutation || (!prizes.length && !selectingPrizes);
-    $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting || requiresDrawApiUpdate() ||
+    $('draw').disabled = !token || !count || !!active() || mutation || confirming || $('designated-dialog').open || !!waiting ||
       !!state?.invalid || (!!state?.excluded && !prize?.allParticipants);
     if ($('draw').disabled) offeredDraw = null;
     else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
@@ -739,7 +750,7 @@ function startOperator() {
         !prizes.length && state.prizes.length ? 'All prizes are archived.' :
           prizes.length && prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
     $('retry').hidden = !waiting;
-    $('retry').disabled = mutation || requiresDrawApiUpdate() || (!!active() && !waiting?.drawTx);
+    $('retry').disabled = mutation || (!!active() && !waiting?.drawTx);
     for (const button of document.querySelectorAll('.reset-prize')) {
       button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
     }
@@ -1054,6 +1065,122 @@ function startOperator() {
   for (const dialog of [$('disconnect-dialog'), $('reset-dialog'), $('bulk-dialog'), $('archived-dialog')]) {
     dialog.addEventListener('close', renderControls);
   }
+  $('designated-dialog').addEventListener('close', renderControls);
+
+  function designatedValues() {
+    return {
+      prizeId: $('designated-prize').value,
+      position: $('designated-position').valueAsNumber,
+      name: $('designated-name').value
+    };
+  }
+
+  function renderDesignated() {
+    const entries = state?.designatedAwards ?? [];
+    const prizes = state?.prizes ?? [];
+    const list = $('designated-list');
+    list.replaceChildren(...entries.flatMap(entry => {
+      const prize = prizes.find(item => item.id === entry.prizeId);
+      if (!prize) return [];
+      const item = document.createElement('details');
+      item.append(node('summary', prize.name + ' · Slot ' + number.format(entry.position)));
+      const awarded = entry.position <= prize.won;
+      item.append(node('p', entry.name + (awarded ? ' · Awarded' : prize.archived ? ' · Archived' : ' · Reserved')));
+      if (!awarded && !prize.archived) {
+        const remove = node('button', 'Remove assignment');
+        remove.type = 'button';
+        remove.addEventListener('click', () => changeDesignation({ ...entry, remove: true }));
+        item.append(remove);
+      }
+      return [item];
+    }));
+    if (!entries.length) list.append(node('p', 'No assignments yet.'));
+  }
+
+  function clearDesignationVerification() {
+    designatedVerified = '';
+    $('designated-save').disabled = true;
+    showMessage('designated-verification');
+    showMessage('designated-error');
+  }
+
+  function renderDesignatedSlot() {
+    const prize = state?.prizes.find(item => item.id === $('designated-prize').value);
+    const field = $('designated-position');
+    field.min = (prize?.won ?? 0) + 1;
+    field.max = prize?.limit ?? 1;
+    field.value = field.min;
+    clearDesignationVerification();
+  }
+
+  async function changeDesignation(values) {
+    if (mutation || active() || pending()) return;
+    mutation = true;
+    refreshSequence++;
+    showMessage('designated-error');
+    const form = $('designated-form');
+    form.inert = true;
+    renderControls();
+    try {
+      await api('adminDesignatedAward', values);
+      if (!values.remove) {
+        $('designated-name').value = '';
+        clearDesignationVerification();
+      }
+      await refresh(true);
+      if (!remotePresentation) queuePresentation('selection');
+      showMessage('designated-verification', values.remove ? 'Assignment removed.' : '✓ Assignment saved.');
+    } catch (error) {
+      showMessage('designated-error', error.message);
+    } finally {
+      mutation = false;
+      form.inert = false;
+      renderControls();
+    }
+  }
+
+  function openDesignatedAdmin() {
+    if (!token || !Array.isArray(state?.designatedAwards) || mutation || !!active() || pending()) {
+      if (token && !Array.isArray(state?.designatedAwards)) showMessage('issue', 'Admin assignments need the updated Apps Script deployment.');
+      return;
+    }
+    const prizes = state.prizes.filter(prize => !prize.archived && prize.remaining > 0);
+    $('designated-prize').replaceChildren(...prizes.map(prize => new Option(prize.name, prize.id)));
+    $('designated-add-panel').hidden = !prizes.length;
+    $('designated-name').value = '';
+    renderDesignatedSlot();
+    renderDesignated();
+    $('designated-dialog').showModal();
+    renderControls();
+  }
+  $('designated-prize').addEventListener('change', renderDesignatedSlot);
+  $('designated-position').addEventListener('input', clearDesignationVerification);
+  $('designated-name').addEventListener('input', clearDesignationVerification);
+  $('designated-verify').addEventListener('click', async event => {
+    const form = $('designated-form');
+    if (!form.reportValidity()) return;
+    const values = designatedValues();
+    const key = JSON.stringify(values);
+    const button = event.currentTarget;
+    clearDesignationVerification();
+    button.disabled = true;
+    try {
+      await api('adminDesignatedAward', { ...values, verify: true });
+      if (key !== JSON.stringify(designatedValues()) || !$('designated-dialog').open) return;
+      designatedVerified = key;
+      $('designated-save').disabled = false;
+      showMessage('designated-verification', '✓ Exact name verified in ALL IMS.');
+    } catch (error) {
+      if (key === JSON.stringify(designatedValues())) showMessage('designated-error', error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('designated-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const values = designatedValues();
+    if (designatedVerified === JSON.stringify(values)) changeDesignation(values);
+  });
   $('reset-dialog').addEventListener('cancel', event => {
     if (mutation) event.preventDefault();
   });
@@ -1249,7 +1376,17 @@ function startOperator() {
     Object.assign(run, { phase: 'summary', index: run.receipt.count - 1, revealed: run.receipt.count, pausedAt: null });
     updateReveal();
   });
-  $('refresh').addEventListener('click', () => { showMessage('issue'); refresh(); });
+  $('refresh').addEventListener('click', () => {
+    showMessage('issue');
+    refresh();
+    const now = Date.now();
+    if (now - lastRefreshClick > 10000) refreshClicks = 0;
+    lastRefreshClick = now;
+    if (++refreshClicks >= 8) {
+      refreshClicks = 0;
+      openDesignatedAdmin();
+    }
+  });
   $('projector-open').addEventListener('click', () => {
     const url = new URL(location.href);
     url.hash = 'projector=' + projectorId;
