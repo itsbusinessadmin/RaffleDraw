@@ -142,6 +142,29 @@
       </form>
     </dialog>
   </main>
+  <dialog id="designated-dialog" aria-labelledby="designated-heading">
+    <h2 id="designated-heading">Admin assignments</h2>
+    <p class="dialog-copy">Assignments are only visible here. Recipients are reserved for their assigned prizes and are revealed like any other winner.</p>
+    <div id="designated-list"></div>
+    <p id="designated-error" class="error" role="alert" hidden></p>
+    <details id="designated-add-panel">
+      <summary>+ Add assignment</summary>
+      <form id="designated-form">
+        <label for="designated-prize">Prize</label>
+        <select id="designated-prize" required></select>
+        <label for="designated-position">Draw number</label>
+        <input id="designated-position" type="number" min="1" step="1" required>
+        <label for="designated-name">Name</label>
+        <input id="designated-name" maxlength="500" required placeholder="Exact name from ALL IMS">
+        <p id="designated-verification" class="hint" role="status" hidden></p>
+        <div class="dialog-actions">
+          <button id="designated-verify" type="button">Verify name</button>
+          <button id="designated-save" class="primary" type="submit" disabled>Save assignment</button>
+        </div>
+      </form>
+    </details>
+    <div class="dialog-actions"><button type="button" data-close>Close</button></div>
+  </dialog>
   <dialog id="archived-dialog" aria-labelledby="archived-heading">
     <div class="section-head archived-heading">
       <h2 id="archived-heading">Archived prizes</h2>

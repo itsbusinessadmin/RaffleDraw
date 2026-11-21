@@ -1454,3 +1454,28 @@ dialog .error {
     transition: none !important;
   }
 }
+
+/* Hidden admin assignments: only the dialog above, no public styles. */
+#designated-list details {
+  border-block-end: 1px dashed var(--field-line);
+  padding: 8px 4px;
+}
+#designated-list summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+#designated-list p {
+  color: var(--muted);
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+#designated-add-panel {
+  margin-top: 16px;
+}
+#designated-add-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+#designated-verification:not([hidden]) {
+  color: #2e7d32;
+}
