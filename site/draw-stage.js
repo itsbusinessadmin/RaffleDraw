@@ -146,10 +146,16 @@ export class DrawStage {
   }
 
   idle(label, theme) {
-    this.display(theme).idle(label);
+    const display = this.display(theme);
+    display.el.removeAttribute('data-designated');
+    display.idle(label);
   }
 
   show(run, now) {
-    this.display(run.drawTheme).show(run, now);
+    const display = this.display(run.drawTheme);
+    const designated = run.phase !== 'summary' && run.receipt.designated?.includes(run.index + 1);
+    display.el.toggleAttribute('data-designated', !!designated);
+    if (designated && run.drawTheme === 'wheel') display.idle(run.receipt.winners[run.index]);
+    else display.show(run, now);
   }
 }

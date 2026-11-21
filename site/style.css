@@ -1047,6 +1047,35 @@ dialog .error {
   text-transform: uppercase;
   overflow-wrap: anywhere;
 }
+#projector-award-policy {
+  margin: 10px auto 0;
+  max-width: 45ch;
+  color: var(--stage-muted);
+}
+#designated-dialog details {
+  margin-block: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+#designated-dialog summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+#designated-dialog details > p,
+#designated-dialog details > button {
+  margin-block-start: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .draw-wheel[data-designated] .draw-wheel-winner,
+  .reel[data-designated] .reel-row[data-center="true"] {
+    animation: designated-reveal 420ms ease-out both;
+  }
+}
+@keyframes designated-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 #projector button,
 #projector select {
   color: var(--projector-ivory);
