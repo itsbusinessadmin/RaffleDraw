@@ -51,7 +51,7 @@ function renderResults(id, run) {
   const start = list.children.length;
   list.append(...run.receipt.winners.slice(start, count).map((name, offset) => {
     const index = start + offset;
-    return node('li', index === redrawing ? '—' : name + (isDesignated(run, index + 1) ? ' · Designated award' : ''));
+    return node('li', index === redrawing ? '—' : name + (isDesignated(run, index + 1) ? ' · Preselected' : ''));
   }));
 }
 
@@ -97,7 +97,7 @@ if (isProjector) {
     const manualHold = !remote && run?.phase === 'hold' && run.advance === 'manual';
     $('projector-action').hidden = !!remote;
     actionButton.disabled = remote || (revealing ? !manualHold || !nextReady : !drawTx);
-    let actionLabel = revealing ? 'Drawing…' : 'Draw';
+    let actionLabel = revealing ? (isDesignated(run) ? 'Revealing…' : 'Drawing…') : 'Draw';
     if (manualHold) actionLabel = run.revealed === run.receipt.count ? 'Finish draw' : 'Next winner';
     say('projector-action-button', actionLabel);
     showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
@@ -132,9 +132,10 @@ if (isProjector) {
       const done = run.phase === 'complete' || run.phase === 'summary';
       const position = 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count;
       showMessage('projector-position', isDesignated(run) && run.phase !== 'summary'
-        ? 'Designated award · ' + position : done ? 'Draw complete' : position);
+        ? 'Preselected recipient · ' + position : done ? 'Draw complete' : position);
       say('projector-caption', done ? run.revealed + ' winners revealed' :
-        run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
+        run.phase === 'hold' ? run.receipt.winners[run.index] :
+          run.pausedAt ? 'Reveal paused' : isDesignated(run) ? 'Revealing…' : 'Drawing…');
       drawFrame();
     }
     renderResults('projector-results', run);
@@ -791,14 +792,12 @@ function startOperator() {
 
   function updateReveal(kind = 'continue') {
     clearTimeout(advanceTimer);
-    if (run.phase === 'spin' && isDesignated(run)) {
-      Object.assign(run, { phase: 'hold', revealed: Math.max(run.revealed, run.index + 1) });
-    }
     drawFrame();
     const message = run.phase === 'hold' ? run.receipt.winners[run.index] :
-      run.phase === 'spin' ? (run.pausedAt ? 'Reveal paused' : 'Drawing…') : run.revealed + ' winners revealed';
+      run.phase === 'spin' ? (run.pausedAt ? 'Reveal paused' : isDesignated(run) ? 'Revealing…' : 'Drawing…') :
+        run.revealed + ' winners revealed';
     say('stage-status', run.receipt.prizeName);
-    const awardType = isDesignated(run) ? 'Designated award' : 'Winner';
+    const awardType = isDesignated(run) ? 'Preselected recipient · Winner' : 'Winner';
     say('stage-caption', active() ? awardType + ' ' + (run.index + 1) + ' of ' + run.receipt.count + ' · ' + message : message);
     renderResults('operator-results', run);
     queuePresentation(kind);

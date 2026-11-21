@@ -47,7 +47,7 @@ Deploy the Worker and enter its root `https://…workers.dev/` URL in **Connect*
 
 ## 5. Prepare and operate the event
 
-- Open **Designated awards** to verify an exact eligible name in **ALL IMS** and reserve a future winner slot for a prize. The projector discloses the reservation rule and labels the recipient **Designated award** as their name appears. In both themes the designated reveal shows the reserved recipient directly. Random slots use the remaining eligible pool. Deploy the updated Apps Script to enable this feature.
+- Open **Designated awards** to verify an exact eligible name in **ALL IMS** and reserve a future winner slot for a prize. The projector discloses the reservation rule and displays **Preselected recipient** during the animated reveal. The wheel shows a single entry and the ticket uses a gold sweep before the saved recipient appears. Random slots use the remaining eligible pool. Deploy the updated Apps Script to enable this feature.
 
 - Enter or paste participant records into `ALL IMS`. Put column headings on row 1 and keep headers unique. If importing a CSV through Google Sheets, paste into the existing tab or import into a temporary tab and copy the values across. Preserve the existing `ALL IMS` sheet.
 - Use a stable, unique ID per person under **Participant ID** when available. Format this column as plain text before pasting identifiers with leading zeros. The first draw touching an imported roster assigns and persists IDs for eligible rows with missing IDs. Duplicate display names can be legitimate. Preserve the assigned IDs across imports so prior winners can still be recognized. If you have employee IDs in a differently named column, rename that header to `Participant ID`.

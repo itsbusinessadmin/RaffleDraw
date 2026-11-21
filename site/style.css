@@ -1076,6 +1076,12 @@ dialog .error {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+.reel[data-designated-spinning]::before,
+#projector .reel[data-designated-spinning]::before {
+  --ticket-fill: linear-gradient(105deg, transparent calc(var(--designated-glint) - 14%),
+    #fff4cb var(--designated-glint), transparent calc(var(--designated-glint) + 14%)),
+    linear-gradient(105deg, #bd8a48, #f5d48c 44%, #cb9b54);
+}
 #projector button,
 #projector select {
   color: var(--projector-ivory);
