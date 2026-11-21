@@ -52,10 +52,12 @@ test('designated recipients are reserved and land at the assigned slot in reel a
     const prizeId = ok(app.request('prize', { name: 'Mixed Prize', limit: 3, perDraw: 3 })).id;
     const otherId = ok(app.request('prize', { name: 'Random Prize', limit: 1, perDraw: 1 })).id;
     ok(app.request('adminDesignatedAward', { prizeId, position: 2, name: 'Carol' }));
-    // Carol must not win the other prize, and must not appear in its names.
+    // Carol must not win the other prize, but her name still appears in its
+    // names, so there is no visible clue that she is reserved.
     const other = ok(app.request('draw', { tx: randomUUID(), prizeId: otherId }));
     assert.equal(other.winners.includes('Carol'), false);
-    assert.equal(other.names.includes('Carol'), false);
+    assert.equal(other.names.includes('Carol'), true);
+    assert.equal(other.names.length, 5);
     // The designated draw: Carol is always winner 2, in both themes.
     for (let i = 0; i < 5; i++) {
       const trial = setup();
@@ -72,9 +74,11 @@ test('designated recipients are reserved and land at the assigned slot in reel a
     const draw = ok(app.request('draw', { tx: randomUUID(), prizeId, drawTheme }));
     assert.deepEqual(draw.designated, [2]);
     assert.equal(draw.winners[1], 'Carol');
-    assert.equal(app.request('redraw', { tx: randomUUID(), drawTx: draw.tx, position: 2, prizeId }).code, 'VALIDATION');
+    const redraw = app.request('redraw', { tx: randomUUID(), drawTx: draw.tx, position: 2, prizeId });
+    assert.equal(redraw.code, 'VALIDATION');
+    assert.equal(/designated/i.test(redraw.message), false, 're-draw error must not name the reason');
     assert.deepEqual(ok(app.request('receipt', { tx: draw.tx })).designated, [2]);
-    assert.equal(ok(app.request('state')).history.find(w => w.id === '3').designated, true);
+    assert.equal('designated' in ok(app.request('state')).history.find(w => w.id === '3'), false);
   }
 });
 
@@ -82,13 +86,14 @@ test('designated awards adjust the draw count and cannot target a winner who alr
   const app = setup();
   const prizeId = ok(app.request('prize', { name: 'Mixed Prize', limit: 3, perDraw: 3 })).id;
   const stateBefore = ok(app.request('state'));
-  // No assignments yet: no drawCount field, the dashboard falls back to perDraw.
-  assert.equal(stateBefore.prizes.find(p => p.id === prizeId).drawCount, undefined);
+  // drawCount is always present, so its presence is not a clue.
+  assert.equal(stateBefore.prizes.find(p => p.id === prizeId).drawCount, 3);
   ok(app.request('adminDesignatedAward', { prizeId, position: 2, name: 'Carol' }));
   const stateAfter = ok(app.request('state'));
-  // One eligible person is reserved, but the plan still draws 3 (2 random + 1 designated).
+  // One eligible person is reserved, but the plan still draws 3 (2 random + 1 designated),
+  // and the prize's eligible count shown in the dashboard does not change.
   assert.equal(stateAfter.prizes.find(p => p.id === prizeId).drawCount, 3);
-  assert.equal(stateAfter.prizes.find(p => p.id === prizeId).eligible, 4);
+  assert.equal(stateAfter.prizes.find(p => p.id === prizeId).eligible, 5);
   // Draw a different prize first (random), then try to designate its winner.
   const otherId = ok(app.request('prize', { name: 'Other Prize', limit: 1, perDraw: 1 })).id;
   const other = ok(app.request('draw', { tx: randomUUID(), prizeId: otherId }));
@@ -103,4 +108,16 @@ test('designated awards adjust the draw count and cannot target a winner who alr
   const dupPrize = ok(dup.request('prize', { name: 'Dup Prize', limit: 1, perDraw: 1 })).id;
   assert.equal(dup.request('adminDesignatedAward', { prizeId: dupPrize, position: 1, name: 'Sam' }).code, 'VALIDATION');
   assert.equal(ok(dup.request('adminDesignatedAward', { prizeId: dupPrize, position: 1, name: 'Alex' })).saved, true);
+});
+
+test('a fully designated draw still shows the full name pool', () => {
+  const app = setup();
+  const prizeId = ok(app.request('prize', { name: 'Single Prize', limit: 1, perDraw: 1 })).id;
+  ok(app.request('adminDesignatedAward', { prizeId, position: 1, name: 'Carol' }));
+  const draw = ok(app.request('draw', { tx: randomUUID(), prizeId, drawTheme: 'wheel' }));
+  assert.deepEqual(draw.winners, ['Carol']);
+  // The wheel / reel pool is the full eligible list, not just the winner.
+  assert.equal(draw.names.length, 5);
+  assert.equal(draw.wheel.names.length, 5);
+  assert.equal(draw.wheel.names[draw.wheel.winnerIndexes[0]], 'Carol');
 });
