@@ -128,7 +128,7 @@ if (isProjector) {
     } else {
       const done = run.phase === 'complete' || run.phase === 'summary';
       showMessage('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
-      say('projector-caption', done ? run.revealed + ' winners revealed' :
+      say('projector-caption', done ? run.revealed + (run.revealed === 1 ? ' winner revealed' : ' winners revealed') :
         run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
       drawFrame();
     }
@@ -790,7 +790,7 @@ function startOperator() {
     clearTimeout(advanceTimer);
     drawFrame();
     const message = run.phase === 'hold' ? run.receipt.winners[run.index] :
-      run.phase === 'spin' ? (run.pausedAt ? 'Reveal paused' : 'Drawing…') : run.revealed + ' winners revealed';
+      run.phase === 'spin' ? (run.pausedAt ? 'Reveal paused' : 'Drawing…') : run.revealed + (run.revealed === 1 ? ' winner revealed' : ' winners revealed');
     say('stage-status', run.receipt.prizeName);
     say('stage-caption', active() ? 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count + ' · ' + message : message);
     renderResults('operator-results', run);
