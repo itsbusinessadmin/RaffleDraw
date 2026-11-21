@@ -417,7 +417,6 @@ function state_(db) {
   const byTx = new Map(db.history.map(draw => [draw.tx, draw]));
   const reservedCurrent = db.reserved.size ? db.eligible.filter(person => db.reserved.has(person.id)).length : 0;
   const reservedPrevious = [...db.reserved].filter(id => db.winsByParticipant.has(id));
-  const designatedByTx = new Map(db.history.map(draw => [draw.tx, designatedPositions_(db, draw.tx)]));
   return {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
     presentationSync: true, allParticipantsMode: true, redrawMode: true, revealSeconds: db.revealSeconds,
@@ -425,16 +424,16 @@ function state_(db) {
     drawTheme: db.drawTheme, wheelSeconds: db.wheelSeconds, wheelNamesPerSecond: db.wheelNamesPerSecond,
     total: db.eligible.length + db.invalid + db.winsByParticipant.size, eligible: db.eligible.length, won: db.winsByParticipant.size,
     invalid: db.invalid, excluded: db.excluded, designatedAwards: db.designated,
-    prizes: db.designated.length ? db.prizes.map(prize => {
+    prizes: db.prizes.map(prize => {
       const alreadyWon = db.winnersByPrize.get(prize.id);
       const reservedEarlier = prize.allParticipants ? reservedPrevious.filter(id => !alreadyWon?.has(id)).length : 0;
-      const eligible = prize.eligible - reservedCurrent - reservedEarlier;
-      return { ...prize, eligible, drawCount: drawPlan_(db, prize, Math.max(0, eligible)).length };
-    }) : db.prizes,
+      const randomCount = Math.max(0, prize.eligible - reservedCurrent - reservedEarlier);
+      return { ...prize, drawCount: drawPlan_(db, prize, randomCount).length };
+    }),
     lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {
       const draw = byTx.get(winner.tx);
-      return { ...winner, prizeName: draw.prizeName, at: draw.at, designated: designatedByTx.get(winner.tx).includes(winner.position) };
+      return { ...winner, prizeName: draw.prizeName, at: draw.at };
     })
   };
 }
@@ -598,8 +597,10 @@ function drawPlan_(db, prize, randomCount) {
   return plan;
 }
 
-// Participants shown for a prize: designated recipients for this prize are
-// included, recipients reserved for other open prizes are not.
+// Random-selection pool for a prize: recipients reserved for any open prize
+// (including this one, whose recipients are placed separately) are excluded.
+// The display pool (reel / wheel names) is the full eligible list, so a
+// reserved name still appears in the scroll like any other name.
 function participantsForDraw_(db, prize, participants = participantsForPrize_(db, prize)) {
   const reservedOther = new Set(db.designated
     .filter(entry => entry.prizeId !== prize.id && db.prizes.some(item => item.id === entry.prizeId && !item.archived))
@@ -767,7 +768,7 @@ function receipt_(db, draw, reelNames) {
   return {
     ...draw, redrawTx,
     winners: db.winnersByDraw.get(draw.tx).slice().sort((a, b) => a.position - b.position).map(winner => winner.name),
-    names: reelNames || participantsForDraw_(db, prize).map(person => person.name),
+    names: reelNames || participantsForPrize_(db, prize).map(person => person.name),
     designated: designatedPositions_(db, draw.tx),
     wheel: readWheelPool_(db, WHEEL_DRAW_POOL, draw.tx),
     wheelRedraw: readWheelPool_(db, WHEEL_REDRAW_POOL, redrawTx)
@@ -900,7 +901,7 @@ function redraw_(db, key, input) {
     fail_('VALIDATION', 'Choose a winner from this draw.');
   }
   if (designatedPositions_(db, drawTx).includes(position)) {
-    fail_('VALIDATION', 'This slot is a designated award.');
+    fail_('VALIDATION', 'This winner cannot be replaced.');
   }
   const operation = tx + ':' + position;
   const setting = REDRAW + drawTx;
@@ -993,9 +994,8 @@ function draw_(db, key, input) {
   const prize = db.prizes.find(item => item.id === input.prizeId);
   if (!prize) fail_('NOT_FOUND', 'Select an existing prize.');
   if (prize.archived) fail_('VALIDATION', 'This prize is archived. Select another prize.');
-  const participants = participantsForDraw_(db, prize, drawParticipants_(db, prize));
-  const designatedIds = new Set(db.designated.filter(entry => entry.prizeId === prize.id).map(entry => entry.participantId));
-  const randomPool = participants.filter(person => !designatedIds.has(person.id));
+  const participants = drawParticipants_(db, prize);
+  const randomPool = participants.filter(person => !db.reserved.has(person.id));
   const plan = drawPlan_(db, prize, randomPool.length);
   const count = plan.length;
   if (!count) fail_('VALIDATION', 'There are no eligible participants or winning slots for this prize.');
@@ -1007,7 +1007,7 @@ function draw_(db, key, input) {
   const selected = plan.map((entry, index) => {
     if (!entry) return randomWinners[randomIndex++];
     const person = byParticipant.get(entry.participantId);
-    if (!person) fail_('CONFLICT', 'The designated recipient in prize slot ' + entry.position + ' is no longer eligible.');
+    if (!person) fail_('CONFLICT', 'A winner for this prize is no longer eligible. Refresh data and try again.');
     designated.push(index + 1);
     return person;
   });

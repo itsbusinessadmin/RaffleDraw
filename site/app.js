@@ -459,7 +459,7 @@ function startOperator() {
       }
       const position = retry?.position ?? message.position;
       if (!Number.isSafeInteger(position) || position < 1 || position > run.revealed || isDesignated(run, position)) {
-        redrawError = 'Choose a revealed random winner to replace.';
+        redrawError = 'Choose a revealed winner to replace.';
         publish();
         return;
       }
@@ -696,7 +696,7 @@ function startOperator() {
 
   function canPromptRedraw() {
     return !!token && run?.phase === 'hold' && !run.pausedAt && !mutation &&
-      run.revealed > (run.receipt.designated?.filter(position => position <= run.revealed).length ?? 0);
+      !(run.receipt.designated?.some(position => position <= run.revealed));
   }
 
   function requiresDrawApiUpdate() {
