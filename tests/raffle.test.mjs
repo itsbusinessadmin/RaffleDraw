@@ -398,36 +398,30 @@ test('wheel settings persist independently from ticket reel settings', () => {
   assert.deepEqual([reel.drawTheme, reel.wheelSeconds, reel.wheelNamesPerSecond], ['reel', 7.5, 18]);
 });
 
-test('designated recipients are verified, reserved from random draws, and saved at the assigned slot', () => {
+test('retired award data leaves the roster eligible and preserves historical winner records', () => {
   const app = fixture();
   app.initialize();
-  app.loadRoster([['Name'], ['Reserved recipient'], ['Random One'], ['Random Two'], ['Random Three'], ['Random Four']]);
-  const prizeId = ok(app.request('prize', { name: 'Mixed Prize', limit: 3, perDraw: 3 })).id;
-  const otherId = ok(app.request('prize', { name: 'Random Prize', limit: 1, perDraw: 1, allParticipants: true })).id;
-  const entry = { prizeId, position: 2, name: 'Reserved recipient' };
-  const writes = app.writes();
-  assert.equal(app.request('designatedAward', { ...entry, name: 'reserved recipient', verify: true }).code, 'VALIDATION');
-  assert.equal(ok(app.request('designatedAward', { ...entry, verify: true })).verified, true);
-  assert.equal(app.writes(), writes);
-  ok(app.request('designatedAward', entry));
-  const saved = ok(app.request('state')).designatedAwards[0];
-  assert.equal(saved.name, entry.name);
-  assert.equal(app.data('ALL IMS')[1][1], saved.participantId);
-  assert.equal(app.request('designatedAward', { ...entry, position: 1 }).code, 'VALIDATION');
-  assert.equal(app.request('designatedAward', { ...entry, name: 'Random Two' }).code, 'VALIDATION');
-  const other = ok(app.request('draw', { tx: randomUUID(), prizeId: otherId }));
-  assert.equal(other.names.includes(entry.name), false);
-  const input = { tx: randomUUID(), prizeId, drawTheme: 'wheel' };
-  app.fail('after');
-  assert.equal(app.request('draw', input).code, 'BACKEND_ERROR');
-  const draw = ok(app.request('draw', input));
-  assert.deepEqual(draw.designated, [2]);
-  assert.equal(draw.winners[1], entry.name);
-  assert.equal(draw.wheel.names.includes(entry.name), false);
-  assert.equal(app.data('Mixed Prize')[2][0], entry.name);
-  assert.equal(app.data('ALL IMS').some(row => row[0] === entry.name), false);
-  assert.equal(app.request('redraw', { tx: randomUUID(), drawTx: draw.tx, position: 2, prizeId }).code, 'VALIDATION');
-  assert.equal(ok(app.request('state')).history.find(winner => winner.id === saved.participantId).designated, true);
+  app.loadRoster([['Name', 'Participant ID'], ['First', '1']]);
+  const historicalPrize = ok(app.request('prize', { name: 'Historical Prize', limit: 1, perDraw: 1 })).id;
+  const historical = { tx: randomUUID(), prizeId: historicalPrize };
+  ok(app.request('draw', historical));
+  app.loadRoster([['Name', 'Participant ID'], ['Second', '2']]);
+  const nextPrize = ok(app.request('prize', { name: 'Next Prize', limit: 1, perDraw: 1 })).id;
+  app.loadRows('SETTINGS', [...app.data('SETTINGS'),
+    ['designatedDraw:' + historical.tx, '[1]'],
+    ['designated:' + nextPrize + ':1', JSON.stringify({ participantId: '2', name: 'Second', prizeId: nextPrize, position: 1 })]
+  ]);
+  const before = app.data('Historical Prize');
+  assert.equal(app.request('designatedAward', { prizeId: nextPrize, position: 1, name: 'Second' }).code, 'BAD_REQUEST');
+  assert.equal(app.request('receipt', { tx: historical.tx }).code, 'NOT_FOUND');
+  assert.equal(app.request('draw', historical).code, 'CONFLICT');
+  assert.equal(app.request('redraw', { tx: randomUUID(), drawTx: historical.tx, prizeId: historicalPrize, position: 1 }).code, 'CONFLICT');
+  assert.equal(ok(app.request('state')).eligible, 1);
+  const fresh = ok(app.request('draw', { tx: randomUUID(), prizeId: nextPrize, drawTheme: 'wheel' }));
+  assert.deepEqual(fresh.wheel.names, ['Second']);
+  assert.deepEqual(fresh.winners, ['Second']);
+  assert.deepEqual(app.data('Historical Prize'), before);
+  assert.equal(app.data('DRAW_WINNERS').length, 3);
 });
 
 test('wheel receipts keep every entry and the exact selected slices after recovery and re-drawing', () => {

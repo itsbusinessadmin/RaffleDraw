@@ -5,8 +5,6 @@ const GUARD = 'RAFFLE_WRITE_VERSION';
 const ARCHIVED_PRIZE = 'archivedPrize:';
 const ALL_PARTICIPANTS = 'allParticipants:';
 const REDRAW = 'redraw:';
-const DESIGNATED = 'designated:';
-const DESIGNATED_DRAW = 'designatedDraw:';
 const WHEEL_DRAW_POOL = 'wheelDrawPool';
 const WHEEL_REDRAW_POOL = 'wheelRedrawPool';
 const DEFAULT_REVEAL_SECONDS = 4.8;
@@ -102,13 +100,12 @@ function presentation_(cfg) {
 }
 
 function publishPresentation_(cfg, input) {
-  const { kind, origin, eventName, prizeId, prizeName, advance, run, drawTheme, hasDesignated } = input;
+  const { kind, origin, eventName, prizeId, prizeName, advance, run, drawTheme } = input;
   if (!['selection', 'begin', 'continue'].includes(kind) || typeof origin !== 'string' || !UUID.test(origin) ||
       typeof eventName !== 'string' || eventName.length > 120 || typeof prizeName !== 'string' || prizeName.length > 100 ||
       (prizeId !== '' && (typeof prizeId !== 'string' || !UUID.test(prizeId))) ||
       !['auto', 'manual'].includes(advance) ||
-      (drawTheme !== undefined && !validDrawTheme_(drawTheme)) ||
-      (hasDesignated !== undefined && typeof hasDesignated !== 'boolean')) fail_('VALIDATION', 'Invalid projector update.');
+      (drawTheme !== undefined && !validDrawTheme_(drawTheme))) fail_('VALIDATION', 'Invalid projector update.');
   let reveal = null;
   if (kind !== 'selection') {
     const tx = tx_(run?.tx);
@@ -131,7 +128,7 @@ function publishPresentation_(cfg, input) {
     }
     reveal = { tx, phase, index, revealed, elapsed, spin, speed, paused, namesPerSecond, redrawTx };
   }
-  const snapshot = { origin, eventName, prizeId, prizeName, advance, drawTheme, hasDesignated, run: reveal,
+  const snapshot = { origin, eventName, prizeId, prizeName, advance, drawTheme, run: reveal,
     updatedAt: Date.now(), revision: Utilities.getUuid() };
   PropertiesService.getScriptProperties().setProperty(presentationKey_(cfg), JSON.stringify(snapshot));
   return { published: true };
@@ -336,8 +333,6 @@ function database_(id) {
     eligible.push({ row: offset + 1, id: participantId, name });
   });
   const settings = new Map(data.SETTINGS.slice(3));
-  const designated = [...settings].flatMap(([key, value]) =>
-    typeof key === 'string' && key.startsWith(DESIGNATED) && value ? [JSON.parse(value)] : []);
   const prizes = data.PRIZES.slice(1).map(([id, sheetId, name, limit, perDraw, at], index) => {
     const sheet = tabs[name];
     const won = winnersByPrize.get(id)?.size || 0;
@@ -353,8 +348,6 @@ function database_(id) {
       [...winnersByPrize.keys()].some(id => !prizes.some(prize => prize.id === id))) {
     fail_('INTEGRITY', 'Prize identifiers and the winner ledger disagree.');
   }
-  const openPrizeIds = new Set(prizes.filter(prize => !prize.archived).map(prize => prize.id));
-  const reserved = new Set(designated.filter(entry => openPrizeIds.has(entry.prizeId)).map(entry => entry.participantId));
   const revealSeconds = settings.get('revealSeconds');
   const namesPerSecond = settings.get('namesPerSecond');
   const winnerSeconds = settings.get('winnerSeconds');
@@ -362,7 +355,7 @@ function database_(id) {
   const wheelSeconds = settings.get('wheelSeconds');
   const wheelNamesPerSecond = settings.get('wheelNamesPerSecond');
   return { id, tabs, guard, source, bookSheets: book.sheets, data, headers, rawHeaders, nameHeader, idColumn, eligible, invalid, excluded, history,
-    winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds, settings, designated, reserved,
+    winnersByDraw, winnersByPrize, winsByParticipant, prizes, winnerList, activeIds, settings,
     revealSeconds: validDurationSeconds_(revealSeconds) ? revealSeconds : DEFAULT_REVEAL_SECONDS,
     namesPerSecond: validNameRate_(namesPerSecond) ? namesPerSecond : DEFAULT_NAMES_PER_SECOND,
     winnerSeconds: validDurationSeconds_(winnerSeconds) ? winnerSeconds : DEFAULT_WINNER_SECONDS,
@@ -378,7 +371,6 @@ function dispatch_(cfg, input) {
     case 'state': return state_(db);
     case 'settings': return saveSettings_(db, input);
     case 'prize': return savePrize_(db, input);
-    case 'designatedAward': return designatedAward_(db, input);
     case 'archivePrize': {
       const result = archivePrize_(db, input);
       if (result.archived) clearPrizePresentation_(cfg, input.prizeId);
@@ -399,35 +391,30 @@ function dispatch_(cfg, input) {
     case 'receipt': {
       const tx = tx_(input.tx);
       const item = db.history.find(draw => draw.tx === tx);
-      if (!item?.count) fail_('NOT_FOUND', 'No current draw has this transaction ID.');
+      if (!item?.count || retiredAwardBatch_(db, tx)) fail_('NOT_FOUND', 'No current draw has this transaction ID.');
       return receipt_(db, item);
     }
     default: fail_('BAD_REQUEST', 'Unknown action.');
   }
 }
 
+function retiredAwardBatch_(db, tx) {
+  // Keep historical awards in Sheets and prevent their replay as a random draw.
+  return db.settings.has('designatedDraw:' + tx);
+}
+
 function state_(db) {
   const byTx = new Map(db.history.map(draw => [draw.tx, draw]));
-  const reservedCurrent = db.reserved.size ? db.eligible.filter(person => db.reserved.has(person.id)).length : 0;
-  const reservedPrevious = [...db.reserved].filter(id => db.winsByParticipant.has(id));
-  const designatedByTx = new Map(db.history.map(draw => [draw.tx, designatedPositions_(db, draw.tx)]));
   return {
     eventName: db.eventName, nameHeader: db.nameHeader, headers: db.headers.filter(name => name && name !== ID_HEADER),
     presentationSync: true, allParticipantsMode: true, redrawMode: true, revealSeconds: db.revealSeconds,
     namesPerSecond: db.namesPerSecond, winnerSeconds: db.winnerSeconds,
     drawTheme: db.drawTheme, wheelSeconds: db.wheelSeconds, wheelNamesPerSecond: db.wheelNamesPerSecond,
     total: db.eligible.length + db.invalid + db.winsByParticipant.size, eligible: db.eligible.length, won: db.winsByParticipant.size,
-    invalid: db.invalid, excluded: db.excluded, designatedAwards: db.designated,
-    prizes: db.designated.length ? db.prizes.map(prize => {
-      const alreadyWon = db.winnersByPrize.get(prize.id);
-      const reservedEarlier = prize.allParticipants ? reservedPrevious.filter(id => !alreadyWon?.has(id)).length : 0;
-      const eligible = prize.eligible - reservedCurrent - reservedEarlier;
-      return { ...prize, eligible, drawCount: drawPlan_(db, prize, eligible).length };
-    }) : db.prizes,
-    lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
+    invalid: db.invalid, excluded: db.excluded, prizes: db.prizes, lastDraw: db.history.filter(draw => draw.count).at(-1) || null,
     history: db.winnerList.slice().reverse().map(winner => {
       const draw = byTx.get(winner.tx);
-      return { ...winner, prizeName: draw.prizeName, at: draw.at, designated: designatedByTx.get(winner.tx).includes(winner.position) };
+      return { ...winner, prizeName: draw.prizeName, at: draw.at };
     })
   };
 }
@@ -495,9 +482,6 @@ function savePrize_(db, input) {
       perDraw < 1 || perDraw > Math.min(1000, limit) || limit < (current?.won || 0)) {
     fail_('VALIDATION', 'Check the winner limits. Each draw can award up to 1,000 winners and the prize limit must cover existing wins.');
   }
-  if (db.designated.some(entry => entry.prizeId === input.id && entry.position > limit)) {
-    fail_('VALIDATION', 'Remove designated awards beyond the new winner limit before saving.');
-  }
   const sheetId = current?.sheetId ?? newSheetId_(new Set(Object.values(db.tabs).map(sheet => sheet.sheetId)));
   const prizeId = current?.id || Utilities.getUuid();
   const requests = [];
@@ -522,72 +506,6 @@ function savePrize_(db, input) {
 function tx_(value) {
   if (typeof value !== 'string' || !UUID.test(value)) fail_('VALIDATION', 'A valid draw transaction ID is required.');
   return value.toLowerCase();
-}
-
-function designatedAward_(db, input) {
-  const prize = db.prizes.find(item => item.id === input.prizeId && !item.archived);
-  const { position, name } = input;
-  if (!prize || !Number.isSafeInteger(position) || position <= prize.won || position > prize.limit) {
-    fail_('VALIDATION', 'Choose an open winner slot for this prize.');
-  }
-  const key = DESIGNATED + prize.id + ':' + position;
-  const current = db.designated.find(entry => entry.prizeId === prize.id && entry.position === position);
-  const requests = [];
-  if (input.remove === true) {
-    if (current && current.participantId !== input.participantId) {
-      fail_('CONFLICT', 'This assignment changed. Refresh before removing it.');
-    }
-    if (current) {
-      writeSettings_(db, requests, [[key, '']]);
-      commit_(db, requests);
-    }
-    return { removed: true };
-  }
-  if (typeof name !== 'string' || !name || name.length > 500) fail_('VALIDATION', 'Enter the exact name from ALL IMS.');
-  const matches = db.eligible.filter(person => person.name === name);
-  if (matches.length !== 1) {
-    fail_('VALIDATION', matches.length ? 'More than one eligible row has this exact name. Resolve the duplicate names in ALL IMS.' :
-      'This exact name was not found among eligible participants in ALL IMS.');
-  }
-  const person = matches[0];
-  if (current && current.participantId !== person.id) {
-    fail_('VALIDATION', 'Remove the existing designation for this slot before changing its recipient.');
-  }
-  if (person.id && db.designated.some(entry => entry.participantId === person.id &&
-      (entry.prizeId !== prize.id || entry.position !== position))) {
-    fail_('VALIDATION', 'This participant already has a designated prize slot.');
-  }
-  if (input.verify === true) return { verified: true };
-  let participantId = person.id;
-  if (!participantId) {
-    if (db.source.merges?.length) fail_('VALIDATION', 'Unmerge ALL IMS cells before assigning a participant ID.');
-    do { participantId = Utilities.getUuid(); }
-    while (db.activeIds.has(participantId) || db.winsByParticipant.has(participantId));
-    const roster = db.tabs[ROSTER];
-    const column = db.idColumn < 0
-      ? db.data[ROSTER].reduce((width, row) => Math.max(width, row.length), db.rawHeaders.length) : db.idColumn;
-    resize_(requests, roster, person.row + 1, column + 1);
-    if (db.idColumn < 0) requests.push(write_(roster.sheetId, 0, column, [[ID_HEADER]]), header_(roster.sheetId, column + 1));
-    requests.push(write_(roster.sheetId, person.row, column, [[participantId]]));
-  }
-  writeSettings_(db, requests, [[key, JSON.stringify({ prizeId: prize.id, position, name, participantId })]]);
-  commit_(db, requests);
-  return { saved: true };
-}
-
-function randomParticipants_(db, prize, participants = participantsForPrize_(db, prize)) {
-  return db.reserved.size ? participants.filter(person => !db.reserved.has(person.id)) : participants;
-}
-
-function drawPlan_(db, prize, randomCount) {
-  const assignments = new Map(db.designated.filter(entry => entry.prizeId === prize.id).map(entry => [entry.position, entry]));
-  const plan = [];
-  for (let i = 0; i < Math.min(prize.perDraw, prize.remaining); i++) {
-    const assignment = assignments.get(prize.won + i + 1);
-    if (!assignment && randomCount-- <= 0) break;
-    plan.push(assignment || null);
-  }
-  return plan;
 }
 
 function archivePrize_(db, input) {
@@ -737,8 +655,7 @@ function deletePrize_(db, input) {
   resize_(requests, prizes, (prizes.gridProperties.frozenRowCount || 0) + 2, 0);
   deleteRows_(requests, prizes, [prize.index]);
   const settingRows = db.data.SETTINGS.flatMap(([name], index) =>
-    name === ARCHIVED_PRIZE + prize.id || name === ALL_PARTICIPANTS + prize.id ||
-      (typeof name === 'string' && name.startsWith(DESIGNATED + prize.id + ':')) ? [index] : []);
+    name === ARCHIVED_PRIZE + prize.id || name === ALL_PARTICIPANTS + prize.id ? [index] : []);
   deleteRows_(requests, db.tabs.SETTINGS, settingRows);
   commit_(db, requests);
   return { deleted: true };
@@ -750,16 +667,10 @@ function receipt_(db, draw, reelNames) {
   return {
     ...draw, redrawTx,
     winners: db.winnersByDraw.get(draw.tx).slice().sort((a, b) => a.position - b.position).map(winner => winner.name),
-    names: reelNames || randomParticipants_(db, prize).map(person => person.name),
-    designated: designatedPositions_(db, draw.tx),
+    names: reelNames || participantsForPrize_(db, prize).map(person => person.name),
     wheel: readWheelPool_(db, WHEEL_DRAW_POOL, draw.tx),
     wheelRedraw: readWheelPool_(db, WHEEL_REDRAW_POOL, redrawTx)
   };
-}
-
-function designatedPositions_(db, tx) {
-  const value = db.settings.get(DESIGNATED_DRAW + tx);
-  return value ? JSON.parse(value) : [];
 }
 
 function readWheelPool_(db, key, tx) {
@@ -882,12 +793,10 @@ function redraw_(db, key, input) {
   const draw = db.history.find(item => item.tx === drawTx);
   const position = input.position;
   if (!draw?.count || draw.prizeId !== input.prizeId) fail_('NOT_FOUND', 'This draw is no longer available.');
+  if (retiredAwardBatch_(db, drawTx)) fail_('CONFLICT', 'This historical award batch is closed.');
   const old = db.winnersByDraw.get(drawTx).find(winner => winner.position === position);
   if (!old || !Number.isSafeInteger(position) || position < 1 || position > draw.count) {
     fail_('VALIDATION', 'Choose a winner from this draw.');
-  }
-  if (designatedPositions_(db, drawTx).includes(position)) {
-    fail_('VALIDATION', 'This slot is a designated award.');
   }
   const operation = tx + ':' + position;
   const setting = REDRAW + drawTx;
@@ -901,8 +810,7 @@ function redraw_(db, key, input) {
   if (!prize || prize.archived) fail_('VALIDATION', 'This prize is no longer open for changes.');
   const displayName = name => String(name).normalize('NFC').trim().toLowerCase();
   const oldName = displayName(old.name);
-  const participants = randomParticipants_(db, prize, drawParticipants_(db, prize))
-    .filter(person => person.id !== old.id && displayName(person.name) !== oldName);
+  const participants = drawParticipants_(db, prize).filter(person => person.id !== old.id && displayName(person.name) !== oldName);
   if (!participants.length) fail_('VALIDATION', 'There is no other eligible name for this prize.');
   const [replacement] = select_(participants, 1, randomStream_(key, db.id + '/redraw/' + drawTx + '/' + tx));
 
@@ -974,31 +882,20 @@ function draw_(db, key, input) {
   if (prior) {
     if (prior.prizeId !== input.prizeId) fail_('CONFLICT', 'That transaction belongs to another prize.');
     if (!prior.count) fail_('CONFLICT', 'This draw was canceled when the prize was reset. Start a new draw.');
+    if (retiredAwardBatch_(db, tx)) fail_('CONFLICT', 'This historical award batch is closed.');
     return receipt_(db, prior);
   }
   const prize = db.prizes.find(item => item.id === input.prizeId);
   if (!prize) fail_('NOT_FOUND', 'Select an existing prize.');
   if (prize.archived) fail_('VALIDATION', 'This prize is archived. Select another prize.');
   const participants = drawParticipants_(db, prize);
-  const randomPool = randomParticipants_(db, prize, participants);
-  const plan = drawPlan_(db, prize, randomPool.length);
-  const count = plan.length;
+  const count = Math.min(prize.perDraw, prize.remaining, participants.length);
   if (!count) fail_('VALIDATION', 'There are no eligible participants or winning slots for this prize.');
-  const names = randomPool.map(person => person.name);
-  const randomWinners = select_(randomPool, plan.filter(entry => !entry).length, randomStream_(key, db.id + '/' + tx + '/' + prize.id));
-  const designated = [];
-  const byParticipant = new Map(participants.filter(person => person.id).map(person => [person.id, person]));
-  let randomIndex = 0;
-  const selected = plan.map((entry, index) => {
-    if (!entry) return randomWinners[randomIndex++];
-    const person = byParticipant.get(entry.participantId);
-    if (!person) fail_('CONFLICT', 'The designated recipient in prize slot ' + entry.position + ' is no longer eligible.');
-    designated.push(index + 1);
-    return person;
-  });
+  const names = participants.map(person => person.name);
+  const selected = select_(participants, count, randomStream_(key, db.id + '/' + tx + '/' + prize.id));
   let wheel;
   if (input.drawTheme === 'wheel') {
-    const indexes = new Map(randomPool.map((person, index) => [person, index]));
+    const indexes = new Map(participants.map((person, index) => [person, index]));
     wheel = { names, winnerIndexes: selected.map(person => indexes.get(person)) };
   }
   const width = db.data[ROSTER].reduce((max, row) => Math.max(max, row.length), db.headers.length);
@@ -1057,10 +954,7 @@ function draw_(db, key, input) {
   requests.push(write_(history.sheetId, db.data.DRAW_HISTORY.length, 0, [[tx, prize.id, prize.name, db.eventName, at, count]]),
     write_(winners.sheetId, db.data.DRAW_WINNERS.length, 0, selected.map((person, i) => [tx, prize.id, person.id, person.name, i + 1])));
   deleteRows_(requests, roster, selected.flatMap(person => person.row === undefined ? [] : [person.row]));
-  const drawSettings = wheel ? wheelPoolSettings_(db, WHEEL_DRAW_POOL, tx, wheel) : [];
-  if (designated.length) drawSettings.push([DESIGNATED_DRAW + tx, JSON.stringify(designated)]);
-  if (drawSettings.length) writeSettings_(db, requests, drawSettings);
+  if (wheel) writeSettings_(db, requests, wheelPoolSettings_(db, WHEEL_DRAW_POOL, tx, wheel));
   commit_(db, requests);
-  return { tx, prizeId: prize.id, prizeName: prize.name, eventName: db.eventName, at, count,
-    winners: selected.map(person => person.name), names, wheel, designated };
+  return { tx, prizeId: prize.id, prizeName: prize.name, eventName: db.eventName, at, count, winners: selected.map(person => person.name), names, wheel };
 }

@@ -52,14 +52,13 @@ class Wheel {
     this.winner.toggleAttribute('data-preview', preview);
   }
 
-  paint(names, designated = false) {
-    if (this.names === names && this.designated === designated) return;
+  paint(names) {
+    if (this.names === names) return;
     this.names = names;
-    this.designated = designated;
     const count = names.length;
     this.count.textContent = count ? number.format(count) : '';
     this.countLabel.hidden = !count;
-    this.frame.setAttribute('aria-label', designated ? 'Presentation wheel for one preselected recipient' : count
+    this.frame.setAttribute('aria-label', count
       ? 'Draw wheel with ' + number.format(count) + (count === 1 ? ' entry' : ' entries') : 'Empty draw wheel');
     const ctx = this.disc.getContext('2d');
     if (!ctx) return;
@@ -74,7 +73,7 @@ class Wheel {
       ctx.closePath();
       ctx.fillStyle = wheelColors[index % wheelColors.length];
       ctx.fill();
-      if (!designated && count <= 72) {
+      if (count <= 72) {
         ctx.strokeStyle = '#c89e5f';
         ctx.lineWidth = 1.2;
         ctx.stroke();
@@ -89,13 +88,6 @@ class Wheel {
         ctx.restore();
       }
     }
-    if (designated) {
-      ctx.beginPath();
-      ctx.arc(radius, radius, radius * 0.92, -Math.PI * 0.59, -Math.PI * 0.41);
-      ctx.strokeStyle = '#e0ba72';
-      ctx.lineWidth = 8;
-      ctx.stroke();
-    }
   }
 
   idle(label) {
@@ -105,7 +97,7 @@ class Wheel {
     this.setCaption(label);
   }
 
-  show(run, now, designated = false) {
+  show(run, now) {
     const { receipt, index, phase, start, spin, pausedAt, namesPerSecond } = run;
     if (phase === 'summary') {
       this.idle('Draw complete');
@@ -114,8 +106,8 @@ class Wheel {
     if (this.receipt !== receipt || this.index !== index) {
       this.receipt = receipt;
       this.index = index;
-      this.pool = designated ? { names: [receipt.winners[index]], winnerIndex: 0 } : wheelPool(receipt, index);
-      this.paint(this.pool.names, designated);
+      this.pool = wheelPool(receipt, index);
+      this.paint(this.pool.names);
     }
     const { names, winnerIndex } = this.pool;
     const anglePerEntry = 360 / names.length;
@@ -127,8 +119,6 @@ class Wheel {
     this.disc.style.transform = 'rotate(' + angle + 'deg)';
     if (landed) {
       this.setCaption(receipt.winners[index]);
-    } else if (designated) {
-      this.setCaption('');
     } else {
       const interval = 1000 / (namesPerSecond ?? DEFAULT_WHEEL_NAMES_PER_SECOND);
       const sample = Math.floor(Math.max(0, elapsed) / interval) * interval;
@@ -156,24 +146,10 @@ export class DrawStage {
   }
 
   idle(label, theme) {
-    const display = this.display(theme);
-    display.el.removeAttribute('data-designated');
-    display.el.removeAttribute('data-designated-spinning');
-    display.idle(label);
+    this.display(theme).idle(label);
   }
 
   show(run, now) {
-    const display = this.display(run.drawTheme);
-    const designated = run.phase !== 'summary' && run.receipt.designated?.includes(run.index + 1);
-    display.el.toggleAttribute('data-designated', !!designated);
-    const ticketSweep = designated && run.drawTheme !== 'wheel' && run.phase === 'spin';
-    display.el.toggleAttribute('data-designated-spinning', !!ticketSweep);
-    if (ticketSweep) {
-      const progress = run.spin ? positionAt(((run.pausedAt ?? now) - run.start) / run.spin, 1) : 1;
-      display.el.style.setProperty('--designated-glint', (progress * 140 - 20) + '%');
-      display.idle('');
-    } else {
-      display.show(run, now, designated);
-    }
+    this.display(run.drawTheme).show(run, now);
   }
 }

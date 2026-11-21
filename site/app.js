@@ -33,10 +33,6 @@ function node(tag, label) {
   return element;
 }
 
-function isDesignated(run, position = run?.index + 1) {
-  return run?.receipt.designated?.includes(position) === true;
-}
-
 function renderResults(id, run) {
   const list = $(id);
   const count = run?.revealed ?? 0;
@@ -49,10 +45,8 @@ function renderResults(id, run) {
   if (list.hidden !== !count) list.hidden = !count;
   if (list.children.length === count) return;
   const start = list.children.length;
-  list.append(...run.receipt.winners.slice(start, count).map((name, offset) => {
-    const index = start + offset;
-    return node('li', index === redrawing ? '—' : name + (isDesignated(run, index + 1) ? ' · Preselected' : ''));
-  }));
+  list.append(...run.receipt.winners.slice(start, count).map((name, offset) =>
+    node('li', start + offset === redrawing ? '—' : name)));
 }
 
 if (isProjector) {
@@ -90,14 +84,13 @@ if (isProjector) {
     const { eventName, prizeName, run: currentRun, advance, advanceEditable, drawTx, remote, nextReady } = live;
     const run = currentRun?.phase === 'complete' && currentRun.advance === 'manual' ? null : currentRun;
     $('projector-remote').hidden = !remote;
-    $('projector-award-policy').hidden = !live.hasDesignated;
     advanceSelect.disabled = !advanceEditable;
     advanceSelect.value = advance || 'auto';
     const revealing = run?.phase === 'spin' || run?.phase === 'hold';
     const manualHold = !remote && run?.phase === 'hold' && run.advance === 'manual';
     $('projector-action').hidden = !!remote;
     actionButton.disabled = remote || (revealing ? !manualHold || !nextReady : !drawTx);
-    let actionLabel = revealing ? (isDesignated(run) ? 'Revealing…' : 'Drawing…') : 'Draw';
+    let actionLabel = revealing ? 'Drawing…' : 'Draw';
     if (manualHold) actionLabel = run.revealed === run.receipt.count ? 'Finish draw' : 'Next winner';
     say('projector-action-button', actionLabel);
     showMessage('projector-hold-note', manualHold && !nextReady ? holdMessage : '');
@@ -105,9 +98,9 @@ if (isProjector) {
     redrawButton.title = live.canRedraw ? '' : 'Available while a winner is on the ticket.';
     if (live.redrawPrompt && document.fullscreenElement === projector) {
       if (!redrawDialog.open) {
-        redrawWinner.replaceChildren(...run.receipt.winners.slice(0, run.revealed).flatMap((name, index) =>
-          isDesignated(run, index + 1) ? [] : [new Option((index + 1) + '. ' + name, String(index + 1))]));
-        redrawWinner.value = isDesignated(run) ? redrawWinner.options[redrawWinner.options.length - 1]?.value : String(run.index + 1);
+        redrawWinner.replaceChildren(...run.receipt.winners.slice(0, run.revealed).map((name, index) =>
+          new Option((index + 1) + '. ' + name, String(index + 1))));
+        redrawWinner.value = String(run.index + 1);
       }
       if (live.redrawPending) redrawWinner.value = String(live.redrawPending);
       redrawWinner.disabled = !!(live.redrawBusy || live.redrawPending);
@@ -130,12 +123,9 @@ if (isProjector) {
       say('projector-caption', '');
     } else {
       const done = run.phase === 'complete' || run.phase === 'summary';
-      const position = 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count;
-      showMessage('projector-position', isDesignated(run) && run.phase !== 'summary'
-        ? 'Preselected recipient · ' + position : done ? 'Draw complete' : position);
+      showMessage('projector-position', done ? 'Draw complete' : 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count);
       say('projector-caption', done ? run.revealed + ' winners revealed' :
-        run.phase === 'hold' ? run.receipt.winners[run.index] :
-          run.pausedAt ? 'Reveal paused' : isDesignated(run) ? 'Revealing…' : 'Drawing…');
+        run.phase === 'hold' ? run.receipt.winners[run.index] : run.pausedAt ? 'Reveal paused' : 'Drawing…');
       drawFrame();
     }
     renderResults('projector-results', run);
@@ -232,7 +222,6 @@ function startOperator() {
   let selectingPrizes = false;
   let selectingArchived = false;
   let bulkRequest = null;
-  let designatedVerified = '';
   const selectedPrizes = new Set();
   const selectedArchived = new Set();
   const latestDraws = new Map();
@@ -321,17 +310,12 @@ function startOperator() {
       type: 'state', eventName: state?.eventName || 'Raffle Draw',
       prizeName: state?.prizes.find(prize => prize.id === selected)?.name || '',
       drawTheme: run?.drawTheme || state?.drawTheme,
-      hasDesignated: hasDesignated(),
       drawTx: offeredDraw?.tx, run, advance: active() ? run.advance : $('advance').value,
       advanceEditable: !!state && !!token && !active() && !mutation,
       nextReady: canAdvance(), canRedraw: canPromptRedraw(),
       redrawPrompt, redrawError,
       redrawBusy: redrawPrompt && mutation, redrawPending: redrawPrompt ? pendingRedraw()?.position : null
     });
-  }
-
-  function hasDesignated() {
-    return !!state?.designatedAwards?.some(entry => state.prizes.some(prize => prize.id === entry.prizeId && !prize.archived));
   }
 
   function queuePresentation(kind) {
@@ -348,7 +332,6 @@ function startOperator() {
       prizeName: run?.receipt.prizeName || state.prizes.find(prize => prize.id === selected)?.name || '',
       advance: run?.advance || $('advance').value,
       drawTheme: run?.drawTheme || state.drawTheme,
-      hasDesignated: hasDesignated(),
       run: run && {
         tx: run.receipt.tx, phase: run.phase, index: run.index, revealed: run.revealed, speed: run.speed, spin: run.spin,
         namesPerSecond: run.namesPerSecond,
@@ -406,7 +389,7 @@ function startOperator() {
           return null;
         });
         if (receipt && receipt.redrawTx !== details.redrawTx) return;
-        if (receipt && details.index < receipt.count && details.revealed <= receipt.count) {
+        if (receipt && !receipt.designated?.length && details.index < receipt.count && details.revealed <= receipt.count) {
           const localTime = Date.now();
           const age = details.paused ? 0 : Math.max(0, now - snapshot.updatedAt);
           remoteRun = {
@@ -419,7 +402,7 @@ function startOperator() {
       presentationRevision = snapshot?.revision || null;
       remotePresentation = snapshot && snapshot.origin !== presentationOrigin ? {
         eventName: snapshot.eventName, prizeName: snapshot.prizeName, advance: snapshot.advance,
-        drawTheme: snapshot.drawTheme, hasDesignated: snapshot.hasDesignated, run: remoteRun
+        drawTheme: snapshot.drawTheme, run: remoteRun
       } : null;
       publish();
     } catch (_) {
@@ -468,8 +451,8 @@ function startOperator() {
         return;
       }
       const position = retry?.position ?? message.position;
-      if (!Number.isSafeInteger(position) || position < 1 || position > run.revealed || isDesignated(run, position)) {
-        redrawError = 'Choose a revealed random winner to replace.';
+      if (!Number.isSafeInteger(position) || position < 1 || position > run.revealed) {
+        redrawError = 'Choose a revealed winner to replace.';
         publish();
         return;
       }
@@ -487,7 +470,6 @@ function startOperator() {
     connectionStatus('Sheets connected', 'connected');
     say('updated', 'Last synced ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
     renderDashboard();
-    if ($('designated-dialog').open) renderDesignated();
     if ($('prize-dialog').open) renderPrizeParticipants();
   }
 
@@ -684,6 +666,7 @@ function startOperator() {
     showMessage('prize-empty', prizes.length ? '' : !state ? 'Prizes will appear after you connect.' :
       state.prizes.length ? 'All prizes are archived.' : 'Add the first prize to start drawing.');
     const warnings = [];
+    if (requiresDrawApiUpdate()) warnings.push('Deploy the latest Google Apps Script version to resume draws.');
     if (state?.invalid) warnings.push(number.format(state.invalid) + ' participant rows need a valid name. Review the name column in Settings.');
     if (state?.excluded) warnings.push(number.format(state.excluded) + ' previous winners are back in ALL IMS. Remove their re-imported rows before drawing.');
     showMessage('notice', warnings.join(' '));
@@ -704,8 +687,11 @@ function startOperator() {
   }
 
   function canPromptRedraw() {
-    return !!token && run?.phase === 'hold' && !run.pausedAt && !mutation &&
-      run.revealed > (run.receipt.designated?.filter(position => position <= run.revealed).length ?? 0);
+    return !!token && run?.phase === 'hold' && !run.pausedAt && !mutation && !requiresDrawApiUpdate();
+  }
+
+  function requiresDrawApiUpdate() {
+    return Array.isArray(state?.designatedAwards);
   }
 
   function pendingRedraw() {
@@ -737,13 +723,12 @@ function startOperator() {
     const prizes = state?.prizes.filter(item => !item.archived) || [];
     const prize = prizes.find(item => item.id === selected);
     const eligible = prize?.eligible ?? state?.eligible ?? 0;
-    const count = prize?.drawCount ?? Math.min(prize?.perDraw || 0, prize?.remaining || 0, eligible);
+    const count = Math.min(prize?.perDraw || 0, prize?.remaining || 0, eligible);
     const waiting = token && pending();
     const confirming = $('disconnect-dialog').open || $('reset-dialog').open || $('bulk-dialog').open || $('archived-dialog').open;
-    $('designated-open').disabled = !Array.isArray(state?.designatedAwards) || mutation || !!active() || !!waiting;
     $('prize-select').disabled = !prizes.length || mutation || !!active();
     $('prizes-select-mode').disabled = mutation || (!prizes.length && !selectingPrizes);
-    $('draw').disabled = !token || !count || !!active() || mutation || confirming || $('designated-dialog').open || !!waiting ||
+    $('draw').disabled = !token || !count || !!active() || mutation || confirming || !!waiting || requiresDrawApiUpdate() ||
       !!state?.invalid || (!!state?.excluded && !prize?.allParticipants);
     if ($('draw').disabled) offeredDraw = null;
     else if (offeredDraw?.prizeId !== selected) offeredDraw = { tx: crypto.randomUUID(), prizeId: selected };
@@ -754,7 +739,7 @@ function startOperator() {
         !prizes.length && state.prizes.length ? 'All prizes are archived.' :
           prizes.length && prizes.every(item => !item.remaining) ? 'All prizes are complete.' : 'Choose an available prize.');
     $('retry').hidden = !waiting;
-    $('retry').disabled = mutation || (!!active() && !waiting?.drawTx);
+    $('retry').disabled = mutation || requiresDrawApiUpdate() || (!!active() && !waiting?.drawTx);
     for (const button of document.querySelectorAll('.reset-prize')) {
       button.disabled = !button.dataset.throughTx || mutation || !!active() || !!waiting;
     }
@@ -794,11 +779,9 @@ function startOperator() {
     clearTimeout(advanceTimer);
     drawFrame();
     const message = run.phase === 'hold' ? run.receipt.winners[run.index] :
-      run.phase === 'spin' ? (run.pausedAt ? 'Reveal paused' : isDesignated(run) ? 'Revealing…' : 'Drawing…') :
-        run.revealed + ' winners revealed';
+      run.phase === 'spin' ? (run.pausedAt ? 'Reveal paused' : 'Drawing…') : run.revealed + ' winners revealed';
     say('stage-status', run.receipt.prizeName);
-    const awardType = isDesignated(run) ? 'Preselected recipient · Winner' : 'Winner';
-    say('stage-caption', active() ? awardType + ' ' + (run.index + 1) + ' of ' + run.receipt.count + ' · ' + message : message);
+    say('stage-caption', active() ? 'Winner ' + (run.index + 1) + ' of ' + run.receipt.count + ' · ' + message : message);
     renderResults('operator-results', run);
     queuePresentation(kind);
     renderControls();
@@ -882,7 +865,7 @@ function startOperator() {
   }
 
   async function commitDraw(request) {
-    if (!request || mutation || (active() && !(request.drawTx && redrawPrompt))) return;
+    if (!request || mutation || requiresDrawApiUpdate() || (active() && !(request.drawTx && redrawPrompt))) return;
     mutation = true;
     refreshSequence++;
     savePending(request);
@@ -1071,118 +1054,6 @@ function startOperator() {
   for (const dialog of [$('disconnect-dialog'), $('reset-dialog'), $('bulk-dialog'), $('archived-dialog')]) {
     dialog.addEventListener('close', renderControls);
   }
-  $('designated-dialog').addEventListener('close', renderControls);
-
-  function designatedValues() {
-    return {
-      prizeId: $('designated-prize').value,
-      position: $('designated-position').valueAsNumber,
-      name: $('designated-name').value
-    };
-  }
-
-  function renderDesignated() {
-    const entries = state?.designatedAwards ?? [];
-    const prizes = state?.prizes ?? [];
-    const list = $('designated-list');
-    list.replaceChildren(...entries.flatMap(entry => {
-      const prize = prizes.find(item => item.id === entry.prizeId);
-      if (!prize) return [];
-      const item = document.createElement('details');
-      item.append(node('summary', prize.name + ' · Slot ' + number.format(entry.position)));
-      const awarded = entry.position <= prize.won;
-      item.append(node('p', entry.name + (awarded ? ' · Awarded' : prize.archived ? ' · Archived' : ' · Reserved')));
-      if (!awarded && !prize.archived) {
-        const remove = node('button', 'Remove assignment');
-        remove.type = 'button';
-        remove.addEventListener('click', () => changeDesignation({ ...entry, remove: true }));
-        item.append(remove);
-      }
-      return [item];
-    }));
-    if (!entries.length) list.append(node('p', 'No designated awards.'));
-  }
-
-  function clearDesignationVerification() {
-    designatedVerified = '';
-    $('designated-save').disabled = true;
-    showMessage('designated-verification');
-    showMessage('designated-error');
-  }
-
-  function renderDesignatedSlot() {
-    const prize = state?.prizes.find(item => item.id === $('designated-prize').value);
-    const field = $('designated-position');
-    field.min = (prize?.won ?? 0) + 1;
-    field.max = prize?.limit ?? 1;
-    field.value = field.min;
-    clearDesignationVerification();
-  }
-
-  async function changeDesignation(values) {
-    if (mutation || active() || pending()) return;
-    mutation = true;
-    refreshSequence++;
-    showMessage('designated-error');
-    const form = $('designated-form');
-    form.inert = true;
-    renderControls();
-    try {
-      await api('designatedAward', values);
-      if (!values.remove) {
-        $('designated-name').value = '';
-        clearDesignationVerification();
-      }
-      await refresh(true);
-      if (!remotePresentation) queuePresentation('selection');
-      showMessage('designated-verification', values.remove ? 'Assignment removed.' : '✓ Award saved.');
-    } catch (error) {
-      showMessage('designated-error', error.message);
-    } finally {
-      mutation = false;
-      form.inert = false;
-      renderControls();
-    }
-  }
-
-  $('designated-open').addEventListener('click', () => {
-    const prizes = state.prizes.filter(prize => !prize.archived && prize.remaining > 0);
-    $('designated-prize').replaceChildren(...prizes.map(prize => new Option(prize.name, prize.id)));
-    $('designated-add-panel').hidden = !prizes.length;
-    $('designated-name').value = '';
-    renderDesignatedSlot();
-    renderDesignated();
-    $('designated-dialog').showModal();
-    renderControls();
-  });
-  $('designated-prize').addEventListener('change', renderDesignatedSlot);
-  $('designated-position').addEventListener('input', clearDesignationVerification);
-  $('designated-name').addEventListener('input', clearDesignationVerification);
-  $('designated-verify').addEventListener('click', async event => {
-    const form = $('designated-form');
-    if (!form.reportValidity()) return;
-    const values = designatedValues();
-    const key = JSON.stringify(values);
-    const button = event.currentTarget;
-    clearDesignationVerification();
-    button.disabled = true;
-    try {
-      await api('designatedAward', { ...values, verify: true });
-      if (key !== JSON.stringify(designatedValues()) || !$('designated-dialog').open) return;
-      designatedVerified = key;
-      $('designated-save').disabled = false;
-      showMessage('designated-verification', '✓ Exact name verified in ALL IMS.');
-    } catch (error) {
-      if (key === JSON.stringify(designatedValues())) showMessage('designated-error', error.message);
-    } finally {
-      button.disabled = false;
-    }
-  });
-  $('designated-form').addEventListener('submit', event => {
-    event.preventDefault();
-    const values = designatedValues();
-    if (designatedVerified === JSON.stringify(values)) changeDesignation(values);
-  });
   $('reset-dialog').addEventListener('cancel', event => {
     if (mutation) event.preventDefault();
   });

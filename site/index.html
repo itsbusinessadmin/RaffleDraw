@@ -30,7 +30,6 @@
         <h1 id="event">Raffle Draw</h1>
         <div class="actions">
           <button id="settings-open" type="button" disabled>Settings</button>
-          <button id="designated-open" type="button" aria-haspopup="dialog" disabled>Designated awards</button>
           <button id="projector-open" type="button"><span class="screen-icon" aria-hidden="true"></span>Open projector</button>
         </div>
       </div>
@@ -101,9 +100,7 @@
   </main>
   <main id="projector" hidden>
     <header class="projector-head">
-      <div><p id="projector-event">Raffle Draw</p><h1 id="projector-prize">Live draw</h1>
-        <p id="projector-award-policy" class="hint" hidden>Designated recipients are reserved for their assigned prizes.</p>
-      </div>
+      <div><p id="projector-event">Raffle Draw</p><h1 id="projector-prize">Live draw</h1></div>
       <button id="fullscreen" type="button">Enter fullscreen</button>
     </header>
     <div class="projector-tools">
@@ -145,29 +142,6 @@
       </form>
     </dialog>
   </main>
-  <dialog id="designated-dialog" aria-labelledby="designated-heading">
-    <h2 id="designated-heading">Designated awards</h2>
-    <p class="dialog-copy">Recipients are reserved for their assigned prizes. The projector identifies each designated award.</p>
-    <div id="designated-list"></div>
-    <p id="designated-error" class="error" role="alert" hidden></p>
-    <details id="designated-add-panel">
-      <summary>Add award</summary>
-      <form id="designated-form">
-        <label for="designated-prize">Prize</label>
-        <select id="designated-prize" required></select>
-        <label for="designated-position">Winner slot</label>
-        <input id="designated-position" type="number" min="1" step="1" required>
-        <label for="designated-name">Exact name from ALL IMS</label>
-        <input id="designated-name" maxlength="500" required>
-        <p id="designated-verification" class="hint" role="status" hidden></p>
-        <div class="dialog-actions">
-          <button id="designated-verify" type="button">Verify name</button>
-          <button id="designated-save" class="primary" type="submit" disabled>Save award</button>
-        </div>
-      </form>
-    </details>
-    <div class="dialog-actions"><button type="button" data-close>Close</button></div>
-  </dialog>
   <dialog id="archived-dialog" aria-labelledby="archived-heading">
     <div class="section-head archived-heading">
       <h2 id="archived-heading">Archived prizes</h2>
