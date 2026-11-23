@@ -2,7 +2,7 @@ import { Reel, positionAt } from './reel.js';
 
 export const DEFAULT_WHEEL_SECONDS = 6;
 export const DEFAULT_WHEEL_NAMES_PER_SECOND = 12;
-const wheelColors = ["#442639", "#28232e", "#654239", "#593046"];
+const wheelColor = "#593046";
 const wheelSize = 896;
 const number = new Intl.NumberFormat();
 const wrap = (index, length) => ((index % length) + length) % length;
@@ -71,7 +71,7 @@ class Wheel {
       ctx.moveTo(radius, radius);
       ctx.arc(radius, radius, radius, angle - span / 2, angle + span / 2);
       ctx.closePath();
-      ctx.fillStyle = wheelColors[index % wheelColors.length];
+      ctx.fillStyle = wheelColor;
       ctx.fill();
       if (count <= 72) {
         ctx.strokeStyle = '#c89e5f';

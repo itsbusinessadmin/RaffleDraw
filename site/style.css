@@ -581,7 +581,7 @@ footer {
   height: 100%;
   border: 3px solid #e0ba72;
   border-radius: 50%;
-  background: radial-gradient(circle at 45% 35%, #4c2b3c, #1c1520 75%);
+  background: #593046;
   box-shadow: inset 0 0 0 4px #21121a, 0 10px 28px #12080970;
 }
 .draw-wheel-hub,
